@@ -29,3 +29,9 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.test-tailwind {
+  @apply text-3xl font-bold text-blue-500;
+}
+
+
