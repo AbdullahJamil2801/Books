@@ -1,8 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, Fragment, useRef } from 'react';
 import { supabase } from '@/utils/supabaseClient';
 import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 interface Transaction {
   id: string;
@@ -24,6 +27,25 @@ const CATEGORIES = [
   'Other'
 ] as const;
 
+function toYYYYMMDD(dateStr: string): string | null {
+  if (!dateStr) return null;
+  // Try to parse with Date constructor
+  let d = new Date(dateStr);
+  if (!isNaN(d.getTime())) {
+    // Format to YYYY-MM-DD
+    return d.toISOString().split('T')[0];
+  }
+  // Try common formats: DD/MM/YYYY, MM/DD/YYYY, DD-MM-YYYY, MM-DD-YYYY
+  const parts = dateStr.match(/(\d{1,4})[\/-](\d{1,2})[\/-](\d{1,4})/);
+  if (parts) {
+    let [_, p1, p2, p3] = parts;
+    // Heuristic: if year is first or last
+    if (p1.length === 4) return `${p1}-${p2.padStart(2, '0')}-${p3.padStart(2, '0')}`;
+    if (p3.length === 4) return `${p3}-${p2.padStart(2, '0')}-${p1.padStart(2, '0')}`;
+  }
+  return null;
+}
+
 export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -33,6 +55,145 @@ export default function Transactions() {
     description: '',
     amount: '',
     category: '',
+  });
+
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  // Select all toggle
+  const allSelected = transactions.length > 0 && selectedIds.length === transactions.length;
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(transactions.map(t => t.id));
+    }
+  };
+
+  // Toggle single selection
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  // Import/Deletion Success & Confirmation Modal State
+  const [showImportSuccess, setShowImportSuccess] = useState(false);
+  const [importedCount, setImportedCount] = useState(0);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null); // single id or 'bulk'
+  const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
+  const [deletedCount, setDeletedCount] = useState(0);
+
+  // Open delete confirmation modal for single or bulk
+  const openDeleteConfirm = (id: string | null = null) => {
+    setDeleteTarget(id || 'bulk');
+    setShowDeleteConfirm(true);
+  };
+  // Close all confirmation/success modals
+  const closeAllModals = () => {
+    setShowDeleteConfirm(false);
+    setShowDeleteSuccess(false);
+    setShowImportSuccess(false);
+    setDeleteTarget(null);
+    setImportedCount(0);
+    setDeletedCount(0);
+  };
+
+  // Modified handleDelete for single
+  const handleDelete = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      setTransactions(transactions.filter(t => t.id !== id));
+      setDeletedCount(1);
+      setShowDeleteSuccess(true);
+    } catch (error) {
+      console.error('Error deleting transaction:', error);
+      alert('Error deleting transaction. Please try again.');
+    }
+  };
+
+  // Modified handleBulkDelete
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .delete()
+        .in('id', selectedIds);
+      if (error) throw error;
+      setTransactions(transactions.filter(t => !selectedIds.includes(t.id)));
+      setDeletedCount(selectedIds.length);
+      setSelectedIds([]);
+      setShowDeleteSuccess(true);
+    } catch (error) {
+      console.error('Error bulk deleting transactions:', error);
+      alert('Error deleting selected transactions.');
+    }
+  };
+
+  // Modified confirmDelete for modal
+  const confirmDelete = async () => {
+    setShowDeleteConfirm(false);
+    if (deleteTarget === 'bulk') {
+      await handleBulkDelete();
+    } else if (deleteTarget) {
+      await handleDelete(deleteTarget);
+    }
+  };
+
+  // Download as CSV
+  const downloadCSV = () => {
+    const headers = ['Date', 'Description', 'Amount', 'Category'];
+    const rows = transactions.map(t => [t.date, t.description, t.amount, t.category || '']);
+    const csvContent = [headers, ...rows].map(e => e.join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'transactions.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Download as XLSX
+  const downloadXLSX = () => {
+    const ws = XLSX.utils.json_to_sheet(transactions.map(t => ({
+      Date: t.date,
+      Description: t.description,
+      Amount: t.amount,
+      Category: t.category || ''
+    })));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
+    XLSX.writeFile(wb, 'transactions.xlsx');
+  };
+
+  // Download as PDF
+  const downloadPDF = () => {
+    const doc = new jsPDF();
+    const tableColumn = ['Date', 'Description', 'Amount', 'Category'];
+    const tableRows = transactions.map(t => [t.date, t.description, t.amount, t.category || '']);
+    (doc as any).autoTable({ head: [tableColumn], body: tableRows });
+    doc.save('transactions.pdf');
+  };
+
+  // Dropdown state
+  const [downloadOpen, setDownloadOpen] = useState(false);
+
+  // Search state
+  const [search, setSearch] = useState('');
+
+  // Filtered transactions
+  const filteredTransactions = transactions.filter(t => {
+    const searchLower = search.toLowerCase();
+    return (
+      t.description.toLowerCase().includes(searchLower) ||
+      (t.category ? t.category.toLowerCase().includes(searchLower) : false) ||
+      t.amount.toString().includes(searchLower)
+    );
   });
 
   // Fetch transactions on component mount
@@ -118,24 +279,6 @@ export default function Transactions() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this transaction?')) return;
-
-    try {
-      const { error } = await supabase
-        .from('transactions')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
-
-      setTransactions(transactions.filter(t => t.id !== id));
-    } catch (error) {
-      console.error('Error deleting transaction:', error);
-      alert('Error deleting transaction. Please try again.');
-    }
-  };
-
   const handleEdit = (transaction: Transaction) => {
     setEditingId(transaction.id);
     setFormData({
@@ -166,327 +309,817 @@ export default function Transactions() {
     }));
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // CSV Import Modal State
+  const [showCSVModal, setShowCSVModal] = useState(false);
+  const [csvHeaders, setCSVHeaders] = useState<string[]>([]);
+  const [csvRows, setCSVRows] = useState<any[]>([]);
+  const [csvMappings, setCSVMappings] = useState([
+    { source: '', dest: 'date' },
+    { source: '', dest: 'description' },
+    { source: '', dest: 'amount' },
+    { source: '', dest: 'category' },
+  ]);
+  const [csvValidation, setCSVValidation] = useState<{ valid: boolean; errors: string[] }>({ valid: true, errors: [] });
+  const [csvLoading, setCSVLoading] = useState(false);
+  const [csvStep, setCSVStep] = useState<'upload' | 'mapping'>('upload');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-    // Reset file input
-    e.target.value = '';
+  // Drag and drop handlers
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleCSVFile(e.dataTransfer.files[0]);
+    }
+  };
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+  };
 
-    // Log the file details
-    console.log('File details:', {
-      name: file.name,
-      type: file.type,
-      size: file.size
-    });
+  // Handle file input
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      handleCSVFile(e.target.files[0]);
+    }
+  };
 
+  // Handle CSV file
+  const handleCSVFile = (file: File) => {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
-      transformHeader: (header: string) => {
-        // Normalize header names
-        const normalized = header.trim().toLowerCase();
-        console.log('Normalized header:', header, '->', normalized);
-        return normalized;
-      },
-      complete: async (results) => {
-        console.log('CSV Parse Results:', {
-          headers: results.meta.fields,
-          rowCount: results.data.length,
-          firstRow: results.data[0]
+      complete: (results) => {
+        const { data, meta, errors } = results;
+        if (errors.length > 0) {
+          alert(`Error parsing CSV: ${errors[0].message}`);
+          return;
+        }
+        if (!data.length) {
+          alert('No data found in CSV file');
+          return;
+        }
+        setCSVHeaders(meta.fields || []);
+        setCSVRows(data as any[]);
+        const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const DEST_FIELDS = ['date', 'description', 'amount', 'category'];
+        const autoMappings = DEST_FIELDS.map(dest => {
+          const match = (meta.fields || []).find(header =>
+            normalize(header).includes(normalize(dest)) || normalize(dest).includes(normalize(header))
+          );
+          return { source: match || '', dest };
         });
-
-        // Check if we have the required headers
-        const requiredHeaders = ['date', 'description', 'amount'];
-        const missingHeaders = requiredHeaders.filter(
-          header => !results.meta.fields?.includes(header)
-        );
-
-        if (missingHeaders.length > 0) {
-          alert(`Missing required columns: ${missingHeaders.join(', ')}. Please include: date, description, amount`);
-          return;
-        }
-
-        type ParsedRow = { date?: string; description?: string; amount?: string; category?: string };
-        const transactions = (results.data as ParsedRow[]).map((row, index) => {
-          // Log each row for debugging
-          console.log(`Processing row ${index + 1}:`, row);
-
-          // Parse date - try multiple formats
-          let date = row.date;
-          if (date) {
-            // Try to parse the date
-            const parsedDate = new Date(date);
-            if (!isNaN(parsedDate.getTime())) {
-              date = parsedDate.toISOString().split('T')[0];
-            } else {
-              console.warn(`Invalid date format in row ${index + 1}:`, date);
-            }
-          }
-
-          // Parse amount - handle different formats
-          let amount = row.amount;
-          if (typeof amount === 'string') {
-            // Remove currency symbols and commas
-            amount = amount.replace(/[$,]/g, '');
-          }
-          const parsedAmount = parseFloat(amount as string);
-          
-          // Log the parsed values
-          console.log(`Row ${index + 1} parsed values:`, {
-            originalDate: row.date,
-            parsedDate: date,
-            originalAmount: row.amount,
-            parsedAmount: parsedAmount,
-            description: row.description,
-            category: row.category
-          });
-
-          return {
-            date: date || new Date().toISOString().split('T')[0],
-            description: (row.description || '').trim(),
-            amount: isNaN(parsedAmount) ? 0 : parsedAmount,
-            category: (row.category || '').trim() || null
-          };
-        }).filter(t => t.description && !isNaN(t.amount)); // Filter out invalid rows
-
-        console.log('Processed transactions:', transactions);
-
-        if (transactions.length === 0) {
-          alert('No valid transactions found in the CSV file');
-          return;
-        }
-
-        try {
-          // Insert all transactions at once
-          const { data, error } = await supabase
-            .from('transactions')
-            .insert(transactions)
-            .select();
-
-          if (error) {
-            console.error('Supabase error:', error);
-            alert(`Supabase error: ${error.message || error}`);
-            throw error;
-          }
-
-          console.log('Successfully inserted transactions:', data);
-          setTransactions(prev => [...(data || []), ...prev]);
-          alert(`Successfully imported ${transactions.length} transactions`);
-        } catch (error) {
-          console.error('Error importing transactions:', error);
-          if (error && typeof error === 'object' && 'message' in error) {
-            alert(`Error importing transactions: ${(error as { message?: string }).message}`);
-          } else {
-            alert('Error importing transactions.');
-          }
-        }
+        setCSVMappings(autoMappings);
+        setCSVValidation({ valid: true, errors: [] });
+        setCSVStep('mapping');
       },
       error: (error) => {
-        console.error('CSV parsing error:', error);
         alert(`Error reading CSV file: ${error.message}`);
       }
     });
   };
 
+  // Open modal
+  const openCSVModal = () => {
+    setShowCSVModal(true);
+    setCSVStep('upload');
+    setCSVHeaders([]);
+    setCSVRows([]);
+    setCSVMappings([
+      { source: '', dest: 'date' },
+      { source: '', dest: 'description' },
+      { source: '', dest: 'amount' },
+      { source: '', dest: 'category' },
+    ]);
+    setCSVValidation({ valid: true, errors: [] });
+  };
+
+  // Add/remove mapping rows
+  const addMappingRow = () => {
+    setCSVMappings(prev => [...prev, { source: '', dest: '' }]);
+  };
+  const removeMappingRow = (idx: number) => {
+    setCSVMappings(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  // Handle mapping change
+  const handleMappingChange = (idx: number, field: 'source' | 'dest', value: string) => {
+    setCSVMappings(prev => prev.map((m, i) => i === idx ? { ...m, [field]: value } : m));
+  };
+
+  // Validate mapped data
+  const validateCSVRows = useCallback(() => {
+    const errors: string[] = [];
+    // Required fields must be mapped
+    const required = ['date', 'description', 'amount'];
+    for (const req of required) {
+      if (!csvMappings.some(m => m.dest === req && m.source)) {
+        errors.push(`Please map a column to required field: ${req}`);
+      }
+    }
+    // Check for duplicate destination fields
+    const dests = csvMappings.filter(m => m.source).map(m => m.dest);
+    const destSet = new Set(dests);
+    if (dests.length !== destSet.size) {
+      errors.push('Each destination field can only be mapped once.');
+    }
+    // Validate rows
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    csvRows.forEach((row, idx) => {
+      const rowNum = idx + 2;
+      const get = (dest: string) => {
+        const mapping = csvMappings.find(m => m.dest === dest && m.source);
+        return mapping ? row[mapping.source] : '';
+      };
+      const dateVal = get('date');
+      const ymd = toYYYYMMDD(dateVal);
+      if (!dateVal) errors.push(`Row ${rowNum}: Missing date.`);
+      if (dateVal && !ymd) errors.push(`Row ${rowNum}: Invalid date format (${dateVal}). Use YYYY-MM-DD or a recognizable date.`);
+      if (!get('description')) errors.push(`Row ${rowNum}: Missing description.`);
+      if (!get('amount')) errors.push(`Row ${rowNum}: Missing amount.`);
+      if (get('amount') && isNaN(parseFloat(get('amount')))) errors.push(`Row ${rowNum}: Invalid amount (${get('amount')}).`);
+    });
+    setCSVValidation({ valid: errors.length === 0, errors });
+    return errors.length === 0;
+  }, [csvRows, csvMappings]);
+
+  // Modified handleImportCSV to show import success modal
+  const handleImportCSV = async () => {
+    if (!validateCSVRows()) return;
+    setCSVLoading(true);
+    const get = (row: any, dest: string) => {
+      const mapping = csvMappings.find(m => m.dest === dest && m.source);
+      return mapping ? row[mapping.source] : '';
+    };
+    const transactionsToImport = csvRows.map(row => ({
+      date: toYYYYMMDD(get(row, 'date')),
+      description: get(row, 'description'),
+      amount: parseFloat(get(row, 'amount')),
+      category: get(row, 'category') || null,
+    }));
+    try {
+      const { data, error } = await supabase
+        .from('transactions')
+        .insert(transactionsToImport)
+        .select();
+      if (error) throw error;
+      setTransactions(prev => [...(data || []), ...prev]);
+      setShowCSVModal(false);
+      setImportedCount(transactionsToImport.length);
+      setShowImportSuccess(true);
+    } catch (error) {
+      alert('Error importing transactions. Please try again.');
+    } finally {
+      setCSVLoading(false);
+    }
+  };
+
+  // Modal state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [modalTransaction, setModalTransaction] = useState<Transaction | null>(null);
+  const initialFocusRef = useRef<HTMLInputElement | null>(null);
+
+  // Open edit modal
+  const openEditModal = (transaction: Transaction) => {
+    setModalTransaction(transaction);
+    setFormData({
+      date: transaction.date,
+      description: transaction.description,
+      amount: transaction.amount.toString(),
+      category: transaction.category || '',
+    });
+    setShowEditModal(true);
+    setEditingId(transaction.id);
+  };
+
+  // Open delete modal
+  const openDeleteModal = (transaction: Transaction) => {
+    setModalTransaction(transaction);
+    setShowDeleteModal(true);
+  };
+
+  // Close modals
+  const closeModals = () => {
+    setShowEditModal(false);
+    setShowDeleteModal(false);
+    setModalTransaction(null);
+    setEditingId(null);
+    resetForm();
+  };
+
   return (
-    <main className="min-h-screen flex">
-      {/* Sidebar - Reusing the same sidebar as dashboard */}
-      <aside className="w-64 bg-gray-800 text-white flex flex-col">
-        <div className="p-6 font-bold text-2xl border-b border-gray-700">Bookkeeping</div>
-        <nav className="flex-1 flex flex-col gap-2 p-4">
-          <a href="/dashboard" className="py-2 px-4 rounded hover:bg-gray-700">Dashboard</a>
-          <a href="/transactions" className="py-2 px-4 rounded bg-gray-700">Transactions</a>
-          <a href="/reports" className="py-2 px-4 rounded hover:bg-gray-700">Reports</a>
-          <a href="/settings" className="py-2 px-4 rounded hover:bg-gray-700">Settings</a>
-        </nav>
-      </aside>
+    <>
+      <main className="min-h-screen flex">
+        {/* Sidebar - Reusing the same sidebar as dashboard */}
+        <aside className="w-64 bg-gray-800 text-white flex flex-col">
+          <div className="p-6 font-bold text-2xl border-b border-gray-700">Bookkeeping</div>
+          <nav className="flex-1 flex flex-col gap-2 p-4">
+            <a href="/dashboard" className="py-2 px-4 rounded hover:bg-gray-700">Dashboard</a>
+            <a href="/transactions" className="py-2 px-4 rounded bg-gray-700">Transactions</a>
+            <a href="/reports" className="py-2 px-4 rounded hover:bg-gray-700">Reports</a>
+            <a href="/settings" className="py-2 px-4 rounded hover:bg-gray-700">Settings</a>
+          </nav>
+        </aside>
 
-      {/* Main Content */}
-      <section className="flex-1 bg-gray-50 p-8">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-3xl font-bold">Transactions</h1>
-          <div className="flex gap-4">
-            <label className="cursor-pointer bg-white px-4 py-2 rounded-md border border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
-              <span className="text-gray-700">Import CSV</span>
-              <input
-                type="file"
-                accept=".csv"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-            </label>
-          </div>
-        </div>
-
-        {/* Add/Edit Transaction Form */}
-        <div className="bg-white rounded-lg shadow p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">
-            {editingId ? 'Edit Transaction' : 'Add New Transaction'}
-          </h2>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <label htmlFor="date" className="block text-sm font-medium text-gray-700 mb-1">
-                  Date
-                </label>
-                <input
-                  type="date"
-                  id="date"
-                  name="date"
-                  value={formData.date}
-                  onChange={handleChange}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
-                  Description
-                </label>
-                <input
-                  type="text"
-                  id="description"
-                  name="description"
-                  value={formData.description}
-                  onChange={handleChange}
-                  placeholder="Enter transaction description"
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="amount" className="block text-sm font-medium text-gray-700 mb-1">
-                  Amount
-                </label>
-                <input
-                  type="number"
-                  id="amount"
-                  name="amount"
-                  value={formData.amount}
-                  onChange={handleChange}
-                  placeholder="0.00"
-                  step="0.01"
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-1">
-                  Category
-                </label>
-                <select
-                  id="category"
-                  name="category"
-                  value={formData.category}
-                  onChange={handleChange}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
-                  <option value="">Select a category</option>
-                  {CATEGORIES.map(category => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              {editingId && (
+        {/* Main Content */}
+        <section className="flex-1 bg-gray-50 p-8">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-3xl font-bold">Transactions</h1>
+            <div className="flex gap-4 relative">
+              <button
+                type="button"
+                onClick={openCSVModal}
+                className="bg-white px-4 py-2 rounded-md border border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-gray-700"
+              >
+                Import CSV
+              </button>
+              <div className="relative">
                 <button
                   type="button"
-                  onClick={resetForm}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  onClick={() => setDownloadOpen((open) => !open)}
+                >
+                  Download ▼
+                </button>
+                {downloadOpen && (
+                  <div className="absolute right-0 mt-2 w-40 bg-white border border-gray-200 rounded shadow-lg z-10">
+                    <button
+                      className="block w-full text-left px-4 py-2 hover:bg-gray-100"
+                      onClick={() => { downloadCSV(); setDownloadOpen(false); }}
+                    >
+                      Download as CSV
+                    </button>
+                    <button
+                      className="block w-full text-left px-4 py-2 hover:bg-gray-100"
+                      onClick={() => { downloadXLSX(); setDownloadOpen(false); }}
+                    >
+                      Download as XLSX
+                    </button>
+                    <button
+                      className="block w-full text-left px-4 py-2 hover:bg-gray-100"
+                      onClick={() => { downloadPDF(); setDownloadOpen(false); }}
+                    >
+                      Download as PDF
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Add/Edit Transaction Form */}
+          <div className="bg-white rounded-lg shadow p-6 mb-8">
+            <h2 className="text-xl font-semibold mb-4">
+              {editingId ? 'Edit Transaction' : 'Add New Transaction'}
+            </h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label htmlFor="date" className="block text-sm font-medium text-gray-700 mb-1">
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    id="date"
+                    name="date"
+                    value={formData.date}
+                    onChange={handleChange}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
+                    Description
+                  </label>
+                  <input
+                    type="text"
+                    id="description"
+                    name="description"
+                    value={formData.description}
+                    onChange={handleChange}
+                    placeholder="Enter transaction description"
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label htmlFor="amount" className="block text-sm font-medium text-gray-700 mb-1">
+                    Amount
+                  </label>
+                  <input
+                    type="number"
+                    id="amount"
+                    name="amount"
+                    value={formData.amount}
+                    onChange={handleChange}
+                    placeholder="0.00"
+                    step="0.01"
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-1">
+                    Category
+                  </label>
+                  <select
+                    id="category"
+                    name="category"
+                    value={formData.category}
+                    onChange={handleChange}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="">Select a category</option>
+                    {CATEGORIES.map(category => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                {editingId && (
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                >
+                  {editingId ? 'Update Transaction' : 'Add Transaction'}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Search Bar */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search by description, category, or amount..."
+              className="w-full md:w-96 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Transactions Table */}
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-xl font-semibold">Transaction History</h2>
+              {selectedIds.length > 0 && (
+                <button
+                  onClick={() => openDeleteConfirm('bulk')}
+                  className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                >
+                  Delete Selected ({selectedIds.length})
+                </button>
+              )}
+            </div>
+            {isLoading ? (
+              <div className="p-6 text-center text-gray-500">
+                Loading transactions...
+              </div>
+            ) : transactions.length === 0 ? (
+              <div className="p-6 text-center text-gray-500">
+                No transactions yet
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          onChange={toggleSelectAll}
+                          aria-label="Select all transactions"
+                        />
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Date
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Description
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Category
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Amount
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {filteredTransactions.map((transaction) => (
+                      <tr key={transaction.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-4 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(transaction.id)}
+                            onChange={() => toggleSelect(transaction.id)}
+                            aria-label={`Select transaction ${transaction.id}`}
+                          />
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {new Date(transaction.date).toLocaleDateString()}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {transaction.description}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {transaction.category || '-'}
+                        </td>
+                        <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-medium ${
+                          transaction.amount < 0 ? 'text-red-600' : 'text-green-600'
+                        }`}>
+                          ${Math.abs(transaction.amount).toFixed(2)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => openEditModal(transaction)}
+                              className="text-blue-600 hover:text-blue-900 focus:outline-none focus:underline"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => openDeleteConfirm(transaction.id)}
+                              className="text-red-600 hover:text-red-900 focus:outline-none focus:underline"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>
+      </main>
+
+      {/* Edit Transaction Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-lg p-6 relative">
+            <h2 className="text-xl font-semibold mb-4">Edit Transaction</h2>
+            <form
+              onSubmit={handleSubmit}
+              className="space-y-4"
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="modal-date" className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                  <input
+                    ref={initialFocusRef}
+                    type="date"
+                    id="modal-date"
+                    name="date"
+                    value={formData.date}
+                    onChange={handleChange}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label htmlFor="modal-description" className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <input
+                    type="text"
+                    id="modal-description"
+                    name="description"
+                    value={formData.description}
+                    onChange={handleChange}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label htmlFor="modal-amount" className="block text-sm font-medium text-gray-700 mb-1">Amount</label>
+                  <input
+                    type="number"
+                    id="modal-amount"
+                    name="amount"
+                    value={formData.amount}
+                    onChange={handleChange}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label htmlFor="modal-category" className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                  <select
+                    id="modal-category"
+                    name="category"
+                    value={formData.category}
+                    onChange={handleChange}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="">Select a category</option>
+                    {CATEGORIES.map(category => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <button
+                  type="button"
+                  onClick={closeModals}
                   className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                 >
                   Cancel
                 </button>
-              )}
+                <button
+                  type="submit"
+                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                >
+                  Update Transaction
+                </button>
+              </div>
+            </form>
+            <button
+              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none"
+              onClick={closeModals}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Transaction Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
+            <h2 className="text-xl font-semibold mb-4">Delete Transaction</h2>
+            <p className="mb-6">Are you sure you want to delete this transaction?</p>
+            <div className="flex justify-end gap-2">
               <button
-                type="submit"
-                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                type="button"
+                onClick={closeModals}
+                className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
               >
-                {editingId ? 'Update Transaction' : 'Add Transaction'}
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+              >
+                Delete
               </button>
             </div>
-          </form>
-        </div>
-
-        {/* Transactions Table */}
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-xl font-semibold">Transaction History</h2>
+            <button
+              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none"
+              onClick={closeModals}
+              aria-label="Close"
+            >
+              ×
+            </button>
           </div>
-          {isLoading ? (
-            <div className="p-6 text-center text-gray-500">
-              Loading transactions...
-            </div>
-          ) : transactions.length === 0 ? (
-            <div className="p-6 text-center text-gray-500">
-              No transactions yet
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Date
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Description
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Category
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Amount
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {transactions.map((transaction) => (
-                    <tr key={transaction.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {new Date(transaction.date).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {transaction.description}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {transaction.category || '-'}
-                      </td>
-                      <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-medium ${
-                        transaction.amount < 0 ? 'text-red-600' : 'text-green-600'
-                      }`}>
-                        ${Math.abs(transaction.amount).toFixed(2)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => handleEdit(transaction)}
-                            className="text-blue-600 hover:text-blue-900 focus:outline-none focus:underline"
+        </div>
+      )}
+
+      {/* CSV Import Modal */}
+      {showCSVModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-3xl p-6 relative">
+            <h2 className="text-xl font-semibold mb-4">Import Transactions from CSV</h2>
+            {csvStep === 'upload' && (
+              <div className="flex flex-col items-center justify-center py-12">
+                <div
+                  className="w-full max-w-md border-2 border-dashed border-gray-300 rounded-lg p-8 flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition"
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <span className="text-4xl mb-2">📄</span>
+                  <span className="text-gray-700 mb-2">Drag and drop your CSV file here</span>
+                  <span className="text-gray-500 text-sm mb-2">or click to select a file</span>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv"
+                    className="hidden"
+                    onChange={handleFileInput}
+                  />
+                </div>
+              </div>
+            )}
+            {csvStep === 'mapping' && (
+              <>
+                <div className="mb-4">
+                  <div className="flex items-center mb-2">
+                    <span className="font-semibold text-green-700 mr-2">Destination fields</span>
+                    <span className="text-xl">→</span>
+                    <span className="font-semibold text-blue-700 ml-2">Source columns</span>
+                  </div>
+                  <div className="space-y-2">
+                    {csvMappings.map((mapping, idx) => {
+                      // Find the preview value from the first row
+                      const preview = mapping.source && csvRows.length > 0 ? csvRows[0][mapping.source] : '';
+                      return (
+                        <div key={idx} className="flex items-center gap-2">
+                          {/* Static destination label */}
+                          <span className="w-40 font-medium text-gray-700">{mapping.dest}</span>
+                          <span className="text-xl">→</span>
+                          <select
+                            value={mapping.source}
+                            onChange={e => handleMappingChange(idx, 'source', e.target.value)}
+                            className="w-48 rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                           >
-                            Edit
-                          </button>
+                            <option value="">Select column...</option>
+                            {csvHeaders.map(header => (
+                              <option key={header} value={header}>{header}</option>
+                            ))}
+                          </select>
+                          {/* Preview value after source dropdown */}
+                          <span className="text-gray-500 text-xs w-32 truncate">{preview}</span>
                           <button
-                            onClick={() => handleDelete(transaction.id)}
-                            className="text-red-600 hover:text-red-900 focus:outline-none focus:underline"
+                            type="button"
+                            className="ml-2 text-gray-400 hover:text-red-600 text-lg"
+                            onClick={() => removeMappingRow(idx)}
+                            disabled={csvMappings.length <= 1}
+                            aria-label="Remove mapping"
                           >
-                            Delete
+                            ×
                           </button>
                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                      );
+                    })}
+                    <button
+                      type="button"
+                      className="mt-2 px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm border border-gray-300"
+                      onClick={addMappingRow}
+                    >
+                      Add mapping
+                    </button>
+                  </div>
+                </div>
+                <div className="mb-4">
+                  <h3 className="font-semibold mb-2">Preview</h3>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm border">
+                      <thead>
+                        <tr>
+                          {['date', 'description', 'amount', 'category'].map(field => (
+                            <th key={field} className="px-2 py-1 border-b">{field.charAt(0).toUpperCase() + field.slice(1)}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {csvRows.slice(0, 5).map((row, idx) => (
+                          <tr key={idx}>
+                            {['date', 'description', 'amount', 'category'].map(field => {
+                              const mapping = csvMappings.find(m => m.dest === field && m.source);
+                              return (
+                                <td key={field} className="px-2 py-1 border-b">
+                                  {mapping ? row[mapping.source] || '' : ''}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                {!csvValidation.valid && (
+                  <div className="mb-4 text-red-600">
+                    <ul className="list-disc pl-5">
+                      {csvValidation.errors.map((err, idx) => <li key={idx}>{err}</li>)}
+                    </ul>
+                  </div>
+                )}
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCSVModal(false)}
+                    className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                    disabled={csvLoading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleImportCSV}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                    disabled={csvLoading}
+                  >
+                    {csvLoading ? 'Importing...' : 'Import'}
+                  </button>
+                </div>
+              </>
+            )}
+            <button
+              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none"
+              onClick={() => setShowCSVModal(false)}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
         </div>
-      </section>
-    </main>
+      )}
+
+      {/* Import Success Modal */}
+      {showImportSuccess && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
+            <h2 className="text-xl font-semibold mb-4">Import Successful</h2>
+            <p className="mb-6">Successfully imported {importedCount} transactions.</p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={closeAllModals}
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              >
+                OK
+              </button>
+            </div>
+            <button
+              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none"
+              onClick={closeAllModals}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
+            <h2 className="text-xl font-semibold mb-4">Confirm Deletion</h2>
+            <p className="mb-6">Are you sure you want to delete {deleteTarget === 'bulk' ? `${selectedIds.length} selected transactions` : 'this transaction'}?</p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeAllModals}
+                className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+              >
+                Delete
+              </button>
+            </div>
+            <button
+              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none"
+              onClick={closeAllModals}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Success Modal */}
+      {showDeleteSuccess && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
+            <h2 className="text-xl font-semibold mb-4">Delete Successful</h2>
+            <p className="mb-6">Successfully deleted {deletedCount} transaction{deletedCount > 1 ? 's' : ''}.</p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={closeAllModals}
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              >
+                OK
+              </button>
+            </div>
+            <button
+              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none"
+              onClick={closeAllModals}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 } 
