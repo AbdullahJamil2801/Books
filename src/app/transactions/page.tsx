@@ -273,9 +273,13 @@ export default function Transactions() {
           console.log('Successfully inserted transactions:', data);
           setTransactions(prev => [...(data || []), ...prev]);
           alert(`Successfully imported ${transactions.length} transactions`);
-        } catch (error: any) {
+        } catch (error) {
           console.error('Error importing transactions:', error);
-          alert(`Error importing transactions: ${error.message || error}`);
+          if (error && typeof error === 'object' && 'message' in error) {
+            alert(`Error importing transactions: ${(error as { message?: string }).message}`);
+          } else {
+            alert('Error importing transactions.');
+          }
         }
       },
       error: (error) => {
