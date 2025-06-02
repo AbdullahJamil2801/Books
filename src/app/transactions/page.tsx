@@ -16,6 +16,8 @@ interface Transaction {
   created_at?: string;
 }
 
+type CSVRow = Record<string, string>;
+
 const CATEGORIES = [
   'Income',
   'Travel',
@@ -30,7 +32,7 @@ const CATEGORIES = [
 function toYYYYMMDD(dateStr: string): string | null {
   if (!dateStr) return null;
   // Try to parse with Date constructor
-  let d = new Date(dateStr);
+  const d = new Date(dateStr);
   if (!isNaN(d.getTime())) {
     // Format to YYYY-MM-DD
     return d.toISOString().split('T')[0];
@@ -38,7 +40,7 @@ function toYYYYMMDD(dateStr: string): string | null {
   // Try common formats: DD/MM/YYYY, MM/DD/YYYY, DD-MM-YYYY, MM-DD-YYYY
   const parts = dateStr.match(/(\d{1,4})[\/-](\d{1,2})[\/-](\d{1,4})/);
   if (parts) {
-    let [_, p1, p2, p3] = parts;
+    const [, p1, p2, p3] = parts;
     // Heuristic: if year is first or last
     if (p1.length === 4) return `${p1}-${p2.padStart(2, '0')}-${p3.padStart(2, '0')}`;
     if (p3.length === 4) return `${p3}-${p2.padStart(2, '0')}-${p1.padStart(2, '0')}`;
@@ -312,7 +314,7 @@ export default function Transactions() {
   // CSV Import Modal State
   const [showCSVModal, setShowCSVModal] = useState(false);
   const [csvHeaders, setCSVHeaders] = useState<string[]>([]);
-  const [csvRows, setCSVRows] = useState<any[]>([]);
+  const [csvRows, setCSVRows] = useState<CSVRow[]>([]);
   const [csvMappings, setCSVMappings] = useState([
     { source: '', dest: 'date' },
     { source: '', dest: 'description' },
@@ -358,7 +360,7 @@ export default function Transactions() {
           return;
         }
         setCSVHeaders(meta.fields || []);
-        setCSVRows(data as any[]);
+        setCSVRows(data as CSVRow[]);
         const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
         const DEST_FIELDS = ['date', 'description', 'amount', 'category'];
         const autoMappings = DEST_FIELDS.map(dest => {
@@ -422,7 +424,6 @@ export default function Transactions() {
       errors.push('Each destination field can only be mapped once.');
     }
     // Validate rows
-    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     csvRows.forEach((row, idx) => {
       const rowNum = idx + 2;
       const get = (dest: string) => {
@@ -445,7 +446,7 @@ export default function Transactions() {
   const handleImportCSV = async () => {
     if (!validateCSVRows()) return;
     setCSVLoading(true);
-    const get = (row: any, dest: string) => {
+    const get = (row: CSVRow, dest: string) => {
       const mapping = csvMappings.find(m => m.dest === dest && m.source);
       return mapping ? row[mapping.source] : '';
     };
