@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/utils/supabaseClient';
 import {
   BarChart,
@@ -47,12 +47,6 @@ export default function Reports() {
     fetchTransactions();
   }, []);
 
-  useEffect(() => {
-    if (transactions.length > 0) {
-      processData();
-    }
-  }, [transactions]);
-
   const fetchTransactions = async () => {
     try {
       const { data, error } = await supabase
@@ -70,7 +64,7 @@ export default function Reports() {
     }
   };
 
-  const processData = () => {
+  const processData = useCallback(() => {
     // Process category data
     const categoryTotals = transactions.reduce((acc, transaction) => {
       const category = transaction.category || 'Uncategorized';
@@ -111,7 +105,13 @@ export default function Reports() {
 
     setCategoryData(categoryChartData);
     setMonthlyData(monthlyChartData);
-  };
+  }, [transactions]);
+
+  useEffect(() => {
+    if (transactions.length > 0) {
+      processData();
+    }
+  }, [transactions, processData]);
 
   if (isLoading) {
     return (

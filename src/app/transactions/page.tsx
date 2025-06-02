@@ -13,13 +13,6 @@ interface Transaction {
   created_at?: string;
 }
 
-interface CSVTransaction {
-  date: string;
-  description: string;
-  amount: string;
-  category?: string;
-}
-
 const CATEGORIES = [
   'Income',
   'Travel',
@@ -214,7 +207,8 @@ export default function Transactions() {
           return;
         }
 
-        const transactions = results.data.map((row: any, index: number) => {
+        type ParsedRow = { date?: string; description?: string; amount?: string; category?: string };
+        const transactions = (results.data as ParsedRow[]).map((row, index) => {
           // Log each row for debugging
           console.log(`Processing row ${index + 1}:`, row);
 
@@ -236,7 +230,7 @@ export default function Transactions() {
             // Remove currency symbols and commas
             amount = amount.replace(/[$,]/g, '');
           }
-          const parsedAmount = parseFloat(amount);
+          const parsedAmount = parseFloat(amount as string);
           
           // Log the parsed values
           console.log(`Row ${index + 1} parsed values:`, {
@@ -272,15 +266,16 @@ export default function Transactions() {
 
           if (error) {
             console.error('Supabase error:', error);
+            alert(`Supabase error: ${error.message || error}`);
             throw error;
           }
 
           console.log('Successfully inserted transactions:', data);
           setTransactions(prev => [...(data || []), ...prev]);
           alert(`Successfully imported ${transactions.length} transactions`);
-        } catch (error) {
+        } catch (error: any) {
           console.error('Error importing transactions:', error);
-          alert('Error importing transactions. Check the console for details.');
+          alert(`Error importing transactions: ${error.message || error}`);
         }
       },
       error: (error) => {
