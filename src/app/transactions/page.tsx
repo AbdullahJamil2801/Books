@@ -2,14 +2,34 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/utils/supabaseClient';
+import Papa from 'papaparse';
 
 interface Transaction {
   id: string;
   date: string;
   description: string;
   amount: number;
+  category: string | null;
   created_at?: string;
 }
+
+interface CSVTransaction {
+  date: string;
+  description: string;
+  amount: string;
+  category?: string;
+}
+
+const CATEGORIES = [
+  'Income',
+  'Travel',
+  'Supplies',
+  'Food',
+  'Utilities',
+  'Entertainment',
+  'Healthcare',
+  'Other'
+] as const;
 
 export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -19,6 +39,7 @@ export default function Transactions() {
     date: new Date().toISOString().split('T')[0],
     description: '',
     amount: '',
+    category: '',
   });
 
   // Fetch transactions on component mount
@@ -58,6 +79,7 @@ export default function Transactions() {
       date: formData.date,
       description: formData.description,
       amount: parseFloat(formData.amount),
+      category: formData.category || null,
     };
 
     try {
@@ -82,6 +104,7 @@ export default function Transactions() {
       date: formData.date,
       description: formData.description,
       amount: parseFloat(formData.amount),
+      category: formData.category || null,
     };
 
     try {
@@ -126,6 +149,7 @@ export default function Transactions() {
       date: transaction.date,
       description: transaction.description,
       amount: transaction.amount.toString(),
+      category: transaction.category || '',
     });
   };
 
@@ -135,15 +159,135 @@ export default function Transactions() {
       date: new Date().toISOString().split('T')[0],
       description: '',
       amount: '',
+      category: '',
     });
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
       [name]: value
     }));
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset file input
+    e.target.value = '';
+
+    // Log the file details
+    console.log('File details:', {
+      name: file.name,
+      type: file.type,
+      size: file.size
+    });
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (header: string) => {
+        // Normalize header names
+        const normalized = header.trim().toLowerCase();
+        console.log('Normalized header:', header, '->', normalized);
+        return normalized;
+      },
+      complete: async (results) => {
+        console.log('CSV Parse Results:', {
+          headers: results.meta.fields,
+          rowCount: results.data.length,
+          firstRow: results.data[0]
+        });
+
+        // Check if we have the required headers
+        const requiredHeaders = ['date', 'description', 'amount'];
+        const missingHeaders = requiredHeaders.filter(
+          header => !results.meta.fields?.includes(header)
+        );
+
+        if (missingHeaders.length > 0) {
+          alert(`Missing required columns: ${missingHeaders.join(', ')}. Please include: date, description, amount`);
+          return;
+        }
+
+        const transactions = results.data.map((row: any, index: number) => {
+          // Log each row for debugging
+          console.log(`Processing row ${index + 1}:`, row);
+
+          // Parse date - try multiple formats
+          let date = row.date;
+          if (date) {
+            // Try to parse the date
+            const parsedDate = new Date(date);
+            if (!isNaN(parsedDate.getTime())) {
+              date = parsedDate.toISOString().split('T')[0];
+            } else {
+              console.warn(`Invalid date format in row ${index + 1}:`, date);
+            }
+          }
+
+          // Parse amount - handle different formats
+          let amount = row.amount;
+          if (typeof amount === 'string') {
+            // Remove currency symbols and commas
+            amount = amount.replace(/[$,]/g, '');
+          }
+          const parsedAmount = parseFloat(amount);
+          
+          // Log the parsed values
+          console.log(`Row ${index + 1} parsed values:`, {
+            originalDate: row.date,
+            parsedDate: date,
+            originalAmount: row.amount,
+            parsedAmount: parsedAmount,
+            description: row.description,
+            category: row.category
+          });
+
+          return {
+            date: date || new Date().toISOString().split('T')[0],
+            description: (row.description || '').trim(),
+            amount: isNaN(parsedAmount) ? 0 : parsedAmount,
+            category: (row.category || '').trim() || null
+          };
+        }).filter(t => t.description && !isNaN(t.amount)); // Filter out invalid rows
+
+        console.log('Processed transactions:', transactions);
+
+        if (transactions.length === 0) {
+          alert('No valid transactions found in the CSV file');
+          return;
+        }
+
+        try {
+          // Insert all transactions at once
+          const { data, error } = await supabase
+            .from('transactions')
+            .insert(transactions)
+            .select();
+
+          if (error) {
+            console.error('Supabase error:', error);
+            throw error;
+          }
+
+          console.log('Successfully inserted transactions:', data);
+          setTransactions(prev => [...(data || []), ...prev]);
+          alert(`Successfully imported ${transactions.length} transactions`);
+        } catch (error) {
+          console.error('Error importing transactions:', error);
+          alert('Error importing transactions. Check the console for details.');
+        }
+      },
+      error: (error) => {
+        console.error('CSV parsing error:', error);
+        alert(`Error reading CSV file: ${error.message}`);
+      }
+    });
   };
 
   return (
@@ -161,7 +305,20 @@ export default function Transactions() {
 
       {/* Main Content */}
       <section className="flex-1 bg-gray-50 p-8">
-        <h1 className="text-3xl font-bold mb-6">Transactions</h1>
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-3xl font-bold">Transactions</h1>
+          <div className="flex gap-4">
+            <label className="cursor-pointer bg-white px-4 py-2 rounded-md border border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+              <span className="text-gray-700">Import CSV</span>
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+            </label>
+          </div>
+        </div>
 
         {/* Add/Edit Transaction Form */}
         <div className="bg-white rounded-lg shadow p-6 mb-8">
@@ -169,7 +326,7 @@ export default function Transactions() {
             {editingId ? 'Edit Transaction' : 'Add New Transaction'}
           </h2>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <label htmlFor="date" className="block text-sm font-medium text-gray-700 mb-1">
                   Date
@@ -214,6 +371,25 @@ export default function Transactions() {
                   className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   required
                 />
+              </div>
+              <div>
+                <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-1">
+                  Category
+                </label>
+                <select
+                  id="category"
+                  name="category"
+                  value={formData.category}
+                  onChange={handleChange}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">Select a category</option>
+                  {CATEGORIES.map(category => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
             <div className="flex justify-end gap-2">
@@ -260,6 +436,9 @@ export default function Transactions() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Description
                     </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Category
+                    </th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Amount
                     </th>
@@ -276,6 +455,9 @@ export default function Transactions() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {transaction.description}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {transaction.category || '-'}
                       </td>
                       <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-medium ${
                         transaction.amount < 0 ? 'text-red-600' : 'text-green-600'
