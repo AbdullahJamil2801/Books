@@ -281,16 +281,6 @@ export default function Transactions() {
     }
   };
 
-  const handleEdit = (transaction: Transaction) => {
-    setEditingId(transaction.id);
-    setFormData({
-      date: transaction.date,
-      description: transaction.description,
-      amount: transaction.amount.toString(),
-      category: transaction.category || '',
-    });
-  };
-
   const resetForm = () => {
     setEditingId(null);
     setFormData({
@@ -471,40 +461,6 @@ export default function Transactions() {
     } finally {
       setCSVLoading(false);
     }
-  };
-
-  // Modal state
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [modalTransaction, setModalTransaction] = useState<Transaction | null>(null);
-  const initialFocusRef = useRef<HTMLInputElement | null>(null);
-
-  // Open edit modal
-  const openEditModal = (transaction: Transaction) => {
-    setModalTransaction(transaction);
-    setFormData({
-      date: transaction.date,
-      description: transaction.description,
-      amount: transaction.amount.toString(),
-      category: transaction.category || '',
-    });
-    setShowEditModal(true);
-    setEditingId(transaction.id);
-  };
-
-  // Open delete modal
-  const openDeleteModal = (transaction: Transaction) => {
-    setModalTransaction(transaction);
-    setShowDeleteModal(true);
-  };
-
-  // Close modals
-  const closeModals = () => {
-    setShowEditModal(false);
-    setShowDeleteModal(false);
-    setModalTransaction(null);
-    setEditingId(null);
-    resetForm();
   };
 
   return (
@@ -749,7 +705,15 @@ export default function Transactions() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
                           <div className="flex justify-end gap-2">
                             <button
-                              onClick={() => openEditModal(transaction)}
+                              onClick={() => {
+                                setEditingId(transaction.id);
+                                setFormData({
+                                  date: transaction.date,
+                                  description: transaction.description,
+                                  amount: transaction.amount.toString(),
+                                  category: transaction.category || '',
+                                });
+                              }}
                               className="text-blue-600 hover:text-blue-900 focus:outline-none focus:underline"
                             >
                               Edit
@@ -771,129 +735,6 @@ export default function Transactions() {
           </div>
         </section>
       </main>
-
-      {/* Edit Transaction Modal */}
-      {showEditModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-          <div className="bg-white rounded-lg shadow-lg w-full max-w-lg p-6 relative">
-            <h2 className="text-xl font-semibold mb-4">Edit Transaction</h2>
-            <form
-              onSubmit={handleSubmit}
-              className="space-y-4"
-            >
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="modal-date" className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-                  <input
-                    ref={initialFocusRef}
-                    type="date"
-                    id="modal-date"
-                    name="date"
-                    value={formData.date}
-                    onChange={handleChange}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-                <div>
-                  <label htmlFor="modal-description" className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                  <input
-                    type="text"
-                    id="modal-description"
-                    name="description"
-                    value={formData.description}
-                    onChange={handleChange}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-                <div>
-                  <label htmlFor="modal-amount" className="block text-sm font-medium text-gray-700 mb-1">Amount</label>
-                  <input
-                    type="number"
-                    id="modal-amount"
-                    name="amount"
-                    value={formData.amount}
-                    onChange={handleChange}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-                <div>
-                  <label htmlFor="modal-category" className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                  <select
-                    id="modal-category"
-                    name="category"
-                    value={formData.category}
-                    onChange={handleChange}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  >
-                    <option value="">Select a category</option>
-                    {CATEGORIES.map(category => (
-                      <option key={category} value={category}>{category}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 mt-4">
-                <button
-                  type="button"
-                  onClick={closeModals}
-                  className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                >
-                  Update Transaction
-                </button>
-              </div>
-            </form>
-            <button
-              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none"
-              onClick={closeModals}
-              aria-label="Close"
-            >
-              ×
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Transaction Modal */}
-      {showDeleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
-            <h2 className="text-xl font-semibold mb-4">Delete Transaction</h2>
-            <p className="mb-6">Are you sure you want to delete this transaction?</p>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={closeModals}
-                className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmDelete}
-                className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-              >
-                Delete
-              </button>
-            </div>
-            <button
-              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none"
-              onClick={closeModals}
-              aria-label="Close"
-            >
-              ×
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* CSV Import Modal */}
       {showCSVModal && (
