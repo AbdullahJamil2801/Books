@@ -5,7 +5,7 @@ import { supabase } from '@/utils/supabaseClient';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 
 interface Transaction {
   id: string;
@@ -178,7 +178,7 @@ export default function Transactions() {
     const doc = new jsPDF();
     const tableColumn = ['Date', 'Description', 'Amount', 'Category'];
     const tableRows = transactions.map(t => [t.date, t.description, t.amount, t.category || '']);
-    (doc as any).autoTable({ head: [tableColumn], body: tableRows });
+    autoTable(doc, { head: [tableColumn], body: tableRows });
     doc.save('transactions.pdf');
   };
 
