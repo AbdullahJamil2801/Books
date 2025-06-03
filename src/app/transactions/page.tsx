@@ -456,7 +456,7 @@ export default function Transactions() {
       setShowCSVModal(false);
       setImportedCount(transactionsToImport.length);
       setShowImportSuccess(true);
-    } catch (error) {
+    } catch {
       alert('Error importing transactions. Please try again.');
     } finally {
       setCSVLoading(false);
