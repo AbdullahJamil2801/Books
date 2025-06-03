@@ -6,6 +6,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import React from 'react';
 
 interface Transaction {
   id: string;
@@ -13,6 +14,7 @@ interface Transaction {
   description: string;
   amount: number;
   category: string | null;
+  document_id?: string;
   created_at?: string;
 }
 
@@ -48,6 +50,28 @@ function toYYYYMMDD(dateStr: string): string | null {
   return null;
 }
 
+// Add this function to check if file is PDF or image
+const isPDFOrImage = (file: File): boolean => {
+  const pdfType = 'application/pdf';
+  const imageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  return file.type === pdfType || imageTypes.includes(file.type);
+};
+
+// Add webhook trigger function
+const triggerWebhook = async (file: File) => {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    await fetch('https://hook.us2.make.com/aov8f1zsnyd6nexiktuk8t5206x2th4g', {
+      method: 'POST',
+      body: formData,
+    });
+  } catch (error) {
+    console.error('Error triggering webhook:', error);
+  }
+};
+
 export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -57,6 +81,7 @@ export default function Transactions() {
     description: '',
     amount: '',
     category: '',
+    document_id: '',
   });
 
   // Bulk selection state
@@ -148,8 +173,8 @@ export default function Transactions() {
 
   // Download as CSV
   const downloadCSV = () => {
-    const headers = ['Date', 'Description', 'Amount', 'Category'];
-    const rows = transactions.map(t => [t.date, t.description, t.amount, t.category || '']);
+    const headers = ['Date', 'Description', 'Amount', 'Category', 'Document ID'];
+    const rows = transactions.map(t => [t.date, t.description, t.amount, t.category || '', t.document_id || '']);
     const csvContent = [headers, ...rows].map(e => e.join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -166,7 +191,8 @@ export default function Transactions() {
       Date: t.date,
       Description: t.description,
       Amount: t.amount,
-      Category: t.category || ''
+      Category: t.category || '',
+      'Document ID': t.document_id || '',
     })));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Transactions');
@@ -176,8 +202,8 @@ export default function Transactions() {
   // Download as PDF
   const downloadPDF = () => {
     const doc = new jsPDF();
-    const tableColumn = ['Date', 'Description', 'Amount', 'Category'];
-    const tableRows = transactions.map(t => [t.date, t.description, t.amount, t.category || '']);
+    const tableColumn = ['Date', 'Description', 'Amount', 'Category', 'Document ID'];
+    const tableRows = transactions.map(t => [t.date, t.description, t.amount, t.category || '', t.document_id || '']);
     autoTable(doc, { head: [tableColumn], body: tableRows });
     doc.save('transactions.pdf');
   };
@@ -236,6 +262,7 @@ export default function Transactions() {
       description: formData.description,
       amount: parseFloat(formData.amount),
       category: formData.category || null,
+      document_id: formData.document_id || undefined,
     };
 
     try {
@@ -261,6 +288,7 @@ export default function Transactions() {
       description: formData.description,
       amount: parseFloat(formData.amount),
       category: formData.category || null,
+      document_id: formData.document_id || undefined,
     };
 
     try {
@@ -288,6 +316,7 @@ export default function Transactions() {
       description: '',
       amount: '',
       category: '',
+      document_id: '',
     });
   };
 
@@ -310,28 +339,55 @@ export default function Transactions() {
     { source: '', dest: 'description' },
     { source: '', dest: 'amount' },
     { source: '', dest: 'category' },
+    { source: '', dest: 'document_id' },
   ]);
   const [csvValidation, setCSVValidation] = useState<{ valid: boolean; errors: string[] }>({ valid: true, errors: [] });
   const [csvLoading, setCSVLoading] = useState(false);
   const [csvStep, setCSVStep] = useState<'upload' | 'mapping'>('upload');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Drag and drop handlers
+  // Add generic upload success modal state
+  const [showUploadSuccess, setShowUploadSuccess] = useState(false);
+
+  // Add state for uploaded file name and upload complete
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [uploadComplete, setUploadComplete] = useState(false);
+
+  // Update handleDrop function
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleCSVFile(e.dataTransfer.files[0]);
+      const file = e.dataTransfer.files[0];
+      if (file.name.endsWith('.csv')) {
+        handleCSVFile(file);
+      } else if (isPDFOrImage(file)) {
+        handlePDFOrImage(file);
+      }
     }
   };
+
+  // Add back handleDragOver function
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
   };
 
-  // Handle file input
+  // Update handleFileInput function
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      handleCSVFile(e.target.files[0]);
+      const file = e.target.files[0];
+      if (file.name.endsWith('.csv')) {
+        handleCSVFile(file);
+      } else if (isPDFOrImage(file)) {
+        handlePDFOrImage(file);
+      }
     }
+  };
+
+  // Update handlePDFOrImage to set file name and upload complete
+  const handlePDFOrImage = async (file: File) => {
+    await triggerWebhook(file);
+    setUploadedFileName(file.name);
+    setUploadComplete(true);
   };
 
   // Handle CSV file
@@ -352,7 +408,7 @@ export default function Transactions() {
         setCSVHeaders(meta.fields || []);
         setCSVRows(data as CSVRow[]);
         const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const DEST_FIELDS = ['date', 'description', 'amount', 'category'];
+        const DEST_FIELDS = ['date', 'description', 'amount', 'category', 'document_id'];
         const autoMappings = DEST_FIELDS.map(dest => {
           const match = (meta.fields || []).find(header =>
             normalize(header).includes(normalize(dest)) || normalize(dest).includes(normalize(header))
@@ -369,7 +425,7 @@ export default function Transactions() {
     });
   };
 
-  // Open modal
+  // Update openCSVModal to reset upload state
   const openCSVModal = () => {
     setShowCSVModal(true);
     setCSVStep('upload');
@@ -380,8 +436,11 @@ export default function Transactions() {
       { source: '', dest: 'description' },
       { source: '', dest: 'amount' },
       { source: '', dest: 'category' },
+      { source: '', dest: 'document_id' },
     ]);
     setCSVValidation({ valid: true, errors: [] });
+    setUploadedFileName(null);
+    setUploadComplete(false);
   };
 
   // Add/remove mapping rows
@@ -445,6 +504,7 @@ export default function Transactions() {
       description: get(row, 'description'),
       amount: parseFloat(get(row, 'amount')),
       category: get(row, 'category') || null,
+      document_id: get(row, 'document_id') || undefined,
     }));
     try {
       const { data, error } = await supabase
@@ -460,6 +520,92 @@ export default function Transactions() {
       alert('Error importing transactions. Please try again.');
     } finally {
       setCSVLoading(false);
+    }
+  };
+
+  // Helper to close and reset modal state
+  const closeCSVModal = () => {
+    setShowCSVModal(false);
+    setUploadedFileName(null);
+    setUploadComplete(false);
+  };
+
+  // Add state for import preview modal and rows
+  const [importPreviewRows, setImportPreviewRows] = useState<Transaction[]>([]);
+  const [showImportPreviewModal, setShowImportPreviewModal] = useState(false);
+  const [importPreviewLoading, setImportPreviewLoading] = useState(false);
+  const [importPreviewError, setImportPreviewError] = useState<string | null>(null);
+  const [importSubmitLoading, setImportSubmitLoading] = useState(false);
+  const [importSubmitError, setImportSubmitError] = useState<string | null>(null);
+
+  // Function to open import preview modal with data
+  const openImportPreviewModal = async (data: any) => {
+    setImportPreviewLoading(true);
+    setImportPreviewError(null);
+    try {
+      const res = await fetch('/api/import-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const json = await res.json();
+      if (json.preview) {
+        setImportPreviewRows(json.preview);
+        setShowImportPreviewModal(true);
+      } else {
+        setImportPreviewError('No preview data returned.');
+      }
+    } catch (err) {
+      setImportPreviewError('Failed to load preview.');
+    } finally {
+      setImportPreviewLoading(false);
+    }
+  };
+
+  // Handler to update a cell in the preview table
+  const handlePreviewCellChange = (rowIdx: number, field: keyof Transaction, value: string) => {
+    setImportPreviewRows(prev => prev.map((row, idx) =>
+      idx === rowIdx ? { ...row, [field]: field === 'amount' ? parseFloat(value) : value } : row
+    ));
+  };
+
+  // Handler to delete a row from preview
+  const handlePreviewDeleteRow = (rowIdx: number) => {
+    setImportPreviewRows(prev => prev.filter((_, idx) => idx !== rowIdx));
+  };
+
+  // Handler to add a new row
+  const handlePreviewAddRow = () => {
+    setImportPreviewRows(prev => [
+      ...prev,
+      { id: '', date: '', description: '', amount: 0, category: '', document_id: '' }
+    ]);
+  };
+
+  // Handler to submit previewed/edited data to Supabase
+  const handleSubmitImportPreview = async () => {
+    setImportSubmitLoading(true);
+    setImportSubmitError(null);
+    try {
+      const res = await fetch('/api/import-transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(importPreviewRows),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setShowImportPreviewModal(false);
+        setImportPreviewRows([]);
+        fetchTransactions(); // refresh main table
+        setShowImportSuccess(true);
+        setImportedCount(importPreviewRows.length);
+      } else {
+        setImportSubmitError(json.error || 'Import failed.');
+      }
+    } catch (err) {
+      setImportSubmitError('Import failed.');
+    } finally {
+      setImportSubmitLoading(false);
     }
   };
 
@@ -529,7 +675,7 @@ export default function Transactions() {
               {editingId ? 'Edit Transaction' : 'Add New Transaction'}
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div>
                   <label htmlFor="date" className="block text-sm font-medium text-gray-700 mb-1">
                     Date
@@ -593,6 +739,20 @@ export default function Transactions() {
                       </option>
                     ))}
                   </select>
+                </div>
+                <div>
+                  <label htmlFor="document_id" className="block text-sm font-medium text-gray-700 mb-1">
+                    Document ID
+                  </label>
+                  <input
+                    type="text"
+                    id="document_id"
+                    name="document_id"
+                    value={formData.document_id}
+                    onChange={handleChange}
+                    placeholder="Enter document or invoice number"
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
                 </div>
               </div>
               <div className="flex justify-end gap-2">
@@ -669,6 +829,9 @@ export default function Transactions() {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Category
                       </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Document ID
+                      </th>
                       <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Amount
                       </th>
@@ -697,6 +860,9 @@ export default function Transactions() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {transaction.category || '-'}
                         </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {transaction.document_id || '-'}
+                        </td>
                         <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-medium ${
                           transaction.amount < 0 ? 'text-red-600' : 'text-green-600'
                         }`}>
@@ -712,6 +878,7 @@ export default function Transactions() {
                                   description: transaction.description,
                                   amount: transaction.amount.toString(),
                                   category: transaction.category || '',
+                                  document_id: transaction.document_id || '',
                                 });
                               }}
                               className="text-blue-600 hover:text-blue-900 focus:outline-none focus:underline"
@@ -738,10 +905,25 @@ export default function Transactions() {
 
       {/* CSV Import Modal */}
       {showCSVModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-          <div className="bg-white rounded-lg shadow-lg w-full max-w-3xl p-6 relative">
-            <h2 className="text-xl font-semibold mb-4">Import Transactions from CSV</h2>
-            {csvStep === 'upload' && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40"
+          onClick={closeCSVModal}
+        >
+          <div
+            className="bg-white rounded-lg shadow-lg w-full max-w-3xl p-6 relative"
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-semibold mb-4">Import Transactions</h2>
+            {/* Close button in top right */}
+            <button
+              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none"
+              onClick={closeCSVModal}
+              aria-label="Close"
+              type="button"
+            >
+              ×
+            </button>
+            {csvStep === 'upload' && !uploadComplete && (
               <div className="flex flex-col items-center justify-center py-12">
                 <div
                   className="w-full max-w-md border-2 border-dashed border-gray-300 rounded-lg p-8 flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition"
@@ -750,15 +932,39 @@ export default function Transactions() {
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <span className="text-4xl mb-2">📄</span>
-                  <span className="text-gray-700 mb-2">Drag and drop your CSV file here</span>
+                  <span className="text-gray-700 mb-2">Drag and drop your CSV, PDF, or image file here</span>
                   <span className="text-gray-500 text-sm mb-2">or click to select a file</span>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".csv"
+                    accept=".csv,.pdf,image/*"
                     className="hidden"
                     onChange={handleFileInput}
                   />
+                </div>
+                {/* Add close button below drag area for accessibility */}
+                <button
+                  type="button"
+                  onClick={closeCSVModal}
+                  className="mt-6 text-gray-500 hover:text-gray-700 underline"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            {csvStep === 'upload' && uploadComplete && uploadedFileName && (
+              <div className="flex flex-col items-center justify-center py-12">
+                <div className="w-full max-w-md border-2 border-green-400 rounded-lg p-8 flex flex-col items-center justify-center bg-green-50">
+                  <span className="text-5xl text-green-500 mb-2">✔️</span>
+                  <span className="text-gray-700 mb-2">{uploadedFileName}</span>
+                  <span className="text-green-700 font-semibold mb-2">Upload complete!</span>
+                  <button
+                    type="button"
+                    onClick={closeCSVModal}
+                    className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  >
+                    Close
+                  </button>
                 </div>
               </div>
             )}
@@ -818,7 +1024,7 @@ export default function Transactions() {
                     <table className="min-w-full text-sm border">
                       <thead>
                         <tr>
-                          {['date', 'description', 'amount', 'category'].map(field => (
+                          {['date', 'description', 'amount', 'category', 'document_id'].map(field => (
                             <th key={field} className="px-2 py-1 border-b">{field.charAt(0).toUpperCase() + field.slice(1)}</th>
                           ))}
                         </tr>
@@ -826,7 +1032,7 @@ export default function Transactions() {
                       <tbody>
                         {csvRows.slice(0, 5).map((row, idx) => (
                           <tr key={idx}>
-                            {['date', 'description', 'amount', 'category'].map(field => {
+                            {['date', 'description', 'amount', 'category', 'document_id'].map(field => {
                               const mapping = csvMappings.find(m => m.dest === field && m.source);
                               return (
                                 <td key={field} className="px-2 py-1 border-b">
@@ -867,13 +1073,6 @@ export default function Transactions() {
                 </div>
               </>
             )}
-            <button
-              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none"
-              onClick={() => setShowCSVModal(false)}
-              aria-label="Close"
-            >
-              ×
-            </button>
           </div>
         </div>
       )}
@@ -959,6 +1158,89 @@ export default function Transactions() {
             >
               ×
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Upload Success Modal for PDF/Image */}
+      {showUploadSuccess && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
+            <h2 className="text-xl font-semibold mb-4">Upload Complete</h2>
+            <p className="mb-6">Your file was uploaded successfully.</p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowUploadSuccess(false)}
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              >
+                OK
+              </button>
+            </div>
+            <button
+              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none"
+              onClick={() => setShowUploadSuccess(false)}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Import Preview Modal */}
+      {showImportPreviewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" onClick={() => setShowImportPreviewModal(false)}>
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-4xl p-6 relative" onClick={e => e.stopPropagation()}>
+            <h2 className="text-xl font-semibold mb-4">Review & Edit Imported Transactions</h2>
+            {importPreviewError && <div className="mb-4 text-red-600">{importPreviewError}</div>}
+            <div className="overflow-x-auto mb-4">
+              <table className="min-w-full text-sm border">
+                <thead>
+                  <tr>
+                    <th className="px-2 py-1 border-b">Date</th>
+                    <th className="px-2 py-1 border-b">Description</th>
+                    <th className="px-2 py-1 border-b">Amount</th>
+                    <th className="px-2 py-1 border-b">Category</th>
+                    <th className="px-2 py-1 border-b">Document ID</th>
+                    <th className="px-2 py-1 border-b">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {importPreviewRows.map((row, idx) => (
+                    <tr key={idx}>
+                      <td className="px-2 py-1 border-b">
+                        <input type="date" value={row.date || ''} onChange={e => handlePreviewCellChange(idx, 'date', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
+                      </td>
+                      <td className="px-2 py-1 border-b">
+                        <input type="text" value={row.description || ''} onChange={e => handlePreviewCellChange(idx, 'description', e.target.value)} className="w-40 border rounded px-1 py-0.5" />
+                      </td>
+                      <td className="px-2 py-1 border-b">
+                        <input type="number" value={row.amount} onChange={e => handlePreviewCellChange(idx, 'amount', e.target.value)} className="w-24 border rounded px-1 py-0.5" />
+                      </td>
+                      <td className="px-2 py-1 border-b">
+                        <input type="text" value={row.category || ''} onChange={e => handlePreviewCellChange(idx, 'category', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
+                      </td>
+                      <td className="px-2 py-1 border-b">
+                        <input type="text" value={row.document_id || ''} onChange={e => handlePreviewCellChange(idx, 'document_id', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
+                      </td>
+                      <td className="px-2 py-1 border-b">
+                        <button onClick={() => handlePreviewDeleteRow(idx)} className="text-red-600 hover:text-red-900">Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex gap-2 mb-4">
+              <button onClick={handlePreviewAddRow} className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm border border-gray-300">Add Row</button>
+            </div>
+            {importSubmitError && <div className="mb-2 text-red-600">{importSubmitError}</div>}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowImportPreviewModal(false)} className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button onClick={handleSubmitImportPreview} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700" disabled={importSubmitLoading}>{importSubmitLoading ? 'Importing...' : 'Import to Database'}</button>
+            </div>
+            <button className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none" onClick={() => setShowImportPreviewModal(false)} aria-label="Close">×</button>
           </div>
         </div>
       )}
