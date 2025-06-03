@@ -533,14 +533,12 @@ export default function Transactions() {
   // Add state for import preview modal and rows
   const [importPreviewRows, setImportPreviewRows] = useState<Transaction[]>([]);
   const [showImportPreviewModal, setShowImportPreviewModal] = useState(false);
-  const [importPreviewLoading, setImportPreviewLoading] = useState(false);
   const [importPreviewError, setImportPreviewError] = useState<string | null>(null);
   const [importSubmitLoading, setImportSubmitLoading] = useState(false);
   const [importSubmitError, setImportSubmitError] = useState<string | null>(null);
 
   // Function to open import preview modal with data
-  const openImportPreviewModal = async (data: any) => {
-    setImportPreviewLoading(true);
+  const openImportPreviewModal = async (data: Transaction[] | Transaction) => {
     setImportPreviewError(null);
     try {
       const res = await fetch('/api/import-preview', {
@@ -556,9 +554,8 @@ export default function Transactions() {
         setImportPreviewError('No preview data returned.');
       }
     } catch (err) {
+      console.error(err);
       setImportPreviewError('Failed to load preview.');
-    } finally {
-      setImportPreviewLoading(false);
     }
   };
 
@@ -603,6 +600,7 @@ export default function Transactions() {
         setImportSubmitError(json.error || 'Import failed.');
       }
     } catch (err) {
+      console.error(err);
       setImportSubmitError('Import failed.');
     } finally {
       setImportSubmitLoading(false);

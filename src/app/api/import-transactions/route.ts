@@ -22,9 +22,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Explicitly cast data as any[] before accessing length
-    return NextResponse.json({ success: true, inserted: data ? (data as any[]).length : 0 });
-  } catch (err) {
+    // Explicitly cast data as unknown[] before accessing length
+    return NextResponse.json({ success: true, inserted: data ? (data as unknown[]).length : 0 });
+  } catch {
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 } 

@@ -6,7 +6,7 @@ export async function POST(req: NextRequest) {
     const transactions = Array.isArray(body) ? body : [body];
     // Optionally validate required fields here
     return NextResponse.json({ preview: transactions });
-  } catch (err) {
+  } catch {
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 } 
