@@ -400,31 +400,28 @@ export default function Transactions() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      // Send to Make.com webhook (do not wait for response)
-      fetch('https://hook.us2.make.com/aov8f1zsnyd6nexiktuk8t5206x2th4g', {
+      // Send to Make.com webhook and wait for response (assume Make.com responds with JSON array)
+      const res = await fetch('https://hook.us2.make.com/aov8f1zsnyd6nexiktuk8t5206x2th4g', {
         method: 'POST',
         body: formData,
       });
-      // Show loader for at least 15 seconds and poll for data
-      const start = Date.now();
-      let found = false;
-      for (let i = 0; i < 30; i++) { // poll for up to 60 seconds (30 * 2s)
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        const res = await fetch('/api/pending-import');
-        const json = await res.json();
-        if (json.data && Array.isArray(json.data)) {
-          setPDFImportRows(json.data);
-          found = true;
-          break;
+      if (!res.ok) throw new Error('Failed to process PDF');
+      const json = await res.json();
+      let transactions;
+      if (Array.isArray(json)) {
+        transactions = json;
+      } else if (json && Array.isArray(json.preview)) {
+        transactions = json.preview;
+      } else if (json && typeof json.preview === 'string') {
+        try {
+          transactions = JSON.parse(json.preview);
+        } catch {
+          throw new Error('Invalid response from Make.com');
         }
+      } else {
+        throw new Error('Invalid response from Make.com');
       }
-      const elapsed = Date.now() - start;
-      if (elapsed < 15000) {
-        await new Promise(resolve => setTimeout(resolve, 15000 - elapsed));
-      }
-      if (!found) {
-        setPDFImportError('Timed out waiting for PDF processing. Please try again.');
-      }
+      setPDFImportRows(transactions);
     } catch {
       setPDFImportError('Failed to process PDF. Please try again.');
     } finally {
