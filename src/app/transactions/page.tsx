@@ -627,6 +627,11 @@ export default function Transactions() {
     setUploadComplete(false);
   };
 
+  // Add a validation function for PDF import rows (if not present)
+  const isPDFImportValid = pdfImportRows.every(
+    row => row.date && row.amount !== undefined && row.amount !== null && row.date !== ''
+  );
+
   return (
     <>
       <main className="min-h-screen flex">
