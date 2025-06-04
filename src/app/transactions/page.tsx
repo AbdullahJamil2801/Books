@@ -1270,6 +1270,9 @@ export default function Transactions() {
                 {!isPDFImportValid && (
                   <div className="mb-2 text-red-600">Missing required fields in one or more transactions.</div>
                 )}
+                {pdfImportSubmitError && (
+                  <div className="mb-2 text-red-600">{pdfImportSubmitError}</div>
+                )}
                 <div className="flex justify-end gap-2">
                   <button onClick={() => setShowPDFImportModal(false)} className="px-4 py-2 rounded-md border border-gray-300 text-gray-700">Cancel</button>
                   <button onClick={handleSubmitPDFImport} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700" disabled={!isPDFImportValid || pdfImportSubmitLoading}>{pdfImportSubmitLoading ? 'Importing...' : 'Import to Database'}</button>
