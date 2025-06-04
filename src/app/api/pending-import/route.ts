@@ -1,18 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/utils/supabaseClient';
 
-// Define a specific type for pending import
-interface PendingTransaction {
-  date: string;
-  description: string;
-  amount: number;
-  category?: string | null;
-  document_id?: string;
-}
-
-// In-memory store for demo (replace with DB or Redis for production)
-let pendingImport: PendingTransaction[] | null = null;
-
 export async function POST(req: NextRequest) {
   try {
     const { id, data } = await req.json();

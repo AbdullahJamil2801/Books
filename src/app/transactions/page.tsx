@@ -429,16 +429,6 @@ export default function Transactions() {
     }
   };
 
-  // Handler to cancel PDF import (delete pending import)
-  const handleCancelPDFImport = async (importId: string) => {
-    setShowPDFImportModal(false);
-    setPDFImportRows([]);
-    setPDFImportError(null);
-    if (importId) {
-      await fetch(`/api/pending-import?id=${importId}`, { method: 'DELETE' });
-    }
-  };
-
   // Handler to update a cell in the PDF import table
   const handlePDFImportCellChange = (rowIdx: number, field: keyof Transaction, value: string) => {
     setPDFImportRows(prev => prev.map((row, idx) =>
