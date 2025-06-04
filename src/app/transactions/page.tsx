@@ -1042,29 +1042,31 @@ export default function Transactions() {
                 <div className="mb-4">
                   <h3 className="font-semibold mb-2">Preview</h3>
                   <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm border">
-                      <thead>
-                        <tr>
-                          {['date', 'description', 'amount', 'category', 'document_id'].map(field => (
-                            <th key={field} className="px-2 py-1 border-b">{field.charAt(0).toUpperCase() + field.slice(1)}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {csvRows.slice(0, 5).map((row, idx) => (
-                          <tr key={idx}>
-                            {['date', 'description', 'amount', 'category', 'document_id'].map(field => {
-                              const mapping = csvMappings.find(m => m.dest === field && m.source);
-                              return (
-                                <td key={field} className="px-2 py-1 border-b">
-                                  {mapping ? row[mapping.source] || '' : ''}
-                                </td>
-                              );
-                            })}
+                    <div className="max-h-[400px] md:max-h-[50vh] overflow-y-auto">
+                      <table className="min-w-full text-sm border">
+                        <thead>
+                          <tr>
+                            {['date', 'description', 'amount', 'category', 'document_id'].map(field => (
+                              <th key={field} className="px-2 py-1 border-b">{field.charAt(0).toUpperCase() + field.slice(1)}</th>
+                            ))}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {csvRows.slice(0, 5).map((row, idx) => (
+                            <tr key={idx}>
+                              {['date', 'description', 'amount', 'category', 'document_id'].map(field => {
+                                const mapping = csvMappings.find(m => m.dest === field && m.source);
+                                return (
+                                  <td key={field} className="px-2 py-1 border-b">
+                                    {mapping ? row[mapping.source] || '' : ''}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
                 {!csvValidation.valid && (
@@ -1224,42 +1226,44 @@ export default function Transactions() {
             ) : (
               <>
                 <div className="overflow-x-auto mb-4">
-                  <table className="min-w-full text-sm border">
-                    <thead>
-                      <tr>
-                        <th className="px-2 py-1 border-b">Date</th>
-                        <th className="px-2 py-1 border-b">Description</th>
-                        <th className="px-2 py-1 border-b">Amount</th>
-                        <th className="px-2 py-1 border-b">Category</th>
-                        <th className="px-2 py-1 border-b">Document ID</th>
-                        <th className="px-2 py-1 border-b">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pdfImportRows.map((row, idx) => (
-                        <tr key={idx}>
-                          <td className="px-2 py-1 border-b">
-                            <input type="date" value={row.date || ''} onChange={e => handlePDFImportCellChange(idx, 'date', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
-                          </td>
-                          <td className="px-2 py-1 border-b">
-                            <input type="text" value={row.description || ''} onChange={e => handlePDFImportCellChange(idx, 'description', e.target.value)} className="w-40 border rounded px-1 py-0.5" />
-                          </td>
-                          <td className="px-2 py-1 border-b">
-                            <input type="number" value={row.amount} onChange={e => handlePDFImportCellChange(idx, 'amount', e.target.value)} className="w-24 border rounded px-1 py-0.5" />
-                          </td>
-                          <td className="px-2 py-1 border-b">
-                            <input type="text" value={row.category || ''} onChange={e => handlePDFImportCellChange(idx, 'category', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
-                          </td>
-                          <td className="px-2 py-1 border-b">
-                            <input type="text" value={row.document_id || ''} onChange={e => handlePDFImportCellChange(idx, 'document_id', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
-                          </td>
-                          <td className="px-2 py-1 border-b">
-                            <button onClick={() => handlePDFImportDeleteRow(idx)} className="text-red-600 hover:text-red-900">Delete</button>
-                          </td>
+                  <div className="max-h-[400px] md:max-h-[50vh] overflow-y-auto">
+                    <table className="min-w-full text-sm border">
+                      <thead>
+                        <tr>
+                          <th className="px-2 py-1 border-b">Date</th>
+                          <th className="px-2 py-1 border-b">Description</th>
+                          <th className="px-2 py-1 border-b">Amount</th>
+                          <th className="px-2 py-1 border-b">Category</th>
+                          <th className="px-2 py-1 border-b">Document ID</th>
+                          <th className="px-2 py-1 border-b">Actions</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {pdfImportRows.map((row, idx) => (
+                          <tr key={idx}>
+                            <td className="px-2 py-1 border-b">
+                              <input type="date" value={row.date || ''} onChange={e => handlePDFImportCellChange(idx, 'date', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
+                            </td>
+                            <td className="px-2 py-1 border-b">
+                              <input type="text" value={row.description || ''} onChange={e => handlePDFImportCellChange(idx, 'description', e.target.value)} className="w-40 border rounded px-1 py-0.5" />
+                            </td>
+                            <td className="px-2 py-1 border-b">
+                              <input type="number" value={row.amount} onChange={e => handlePDFImportCellChange(idx, 'amount', e.target.value)} className="w-24 border rounded px-1 py-0.5" />
+                            </td>
+                            <td className="px-2 py-1 border-b">
+                              <input type="text" value={row.category || ''} onChange={e => handlePDFImportCellChange(idx, 'category', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
+                            </td>
+                            <td className="px-2 py-1 border-b">
+                              <input type="text" value={row.document_id || ''} onChange={e => handlePDFImportCellChange(idx, 'document_id', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
+                            </td>
+                            <td className="px-2 py-1 border-b">
+                              <button onClick={() => handlePDFImportDeleteRow(idx)} className="text-red-600 hover:text-red-900">Delete</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
                 <div className="flex gap-2 mb-4">
                   <button onClick={handlePDFImportAddRow} className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm border border-gray-300">Add Row</button>
