@@ -383,11 +383,100 @@ export default function Transactions() {
     }
   };
 
-  // Update handlePDFOrImage to set file name and upload complete
+  // Add state for PDF import modal and workflow
+  const [showPDFImportModal, setShowPDFImportModal] = useState(false);
+  const [pdfImportLoading, setPDFImportLoading] = useState(false);
+  const [pdfImportError, setPDFImportError] = useState<string | null>(null);
+  const [pdfImportRows, setPDFImportRows] = useState<Transaction[]>([]);
+  const [pdfImportSubmitLoading, setPDFImportSubmitLoading] = useState(false);
+  const [pdfImportSubmitError, setPDFImportSubmitError] = useState<string | null>(null);
+
+  // Handler for PDF upload (replaces handlePDFOrImage for PDFs)
+  const handlePDFUpload = async (file: File) => {
+    setShowPDFImportModal(true);
+    setPDFImportLoading(true);
+    setPDFImportError(null);
+    setPDFImportRows([]);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      // Send to Make.com webhook and expect JSON response
+      const res = await fetch('https://hook.us2.make.com/aov8f1zsnyd6nexiktuk8t5206x2th4g', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!res.ok) throw new Error('Failed to process PDF');
+      const json = await res.json();
+      if (Array.isArray(json)) {
+        setPDFImportRows(json);
+      } else if (json.transactions && Array.isArray(json.transactions)) {
+        setPDFImportRows(json.transactions);
+      } else {
+        throw new Error('Invalid response from Make.com');
+      }
+    } catch (err) {
+      setPDFImportError('Failed to process PDF. Please try again.');
+    } finally {
+      setPDFImportLoading(false);
+    }
+  };
+
+  // Handler to update a cell in the PDF import table
+  const handlePDFImportCellChange = (rowIdx: number, field: keyof Transaction, value: string) => {
+    setPDFImportRows(prev => prev.map((row, idx) =>
+      idx === rowIdx ? { ...row, [field]: field === 'amount' ? parseFloat(value) : value } : row
+    ));
+  };
+
+  // Handler to delete a row from PDF import
+  const handlePDFImportDeleteRow = (rowIdx: number) => {
+    setPDFImportRows(prev => prev.filter((_, idx) => idx !== rowIdx));
+  };
+
+  // Handler to add a new row
+  const handlePDFImportAddRow = () => {
+    setPDFImportRows(prev => [
+      ...prev,
+      { id: '', date: '', description: '', amount: 0, category: '', document_id: '' }
+    ]);
+  };
+
+  // Handler to submit PDF import data to Supabase
+  const handleSubmitPDFImport = async () => {
+    setPDFImportSubmitLoading(true);
+    setPDFImportSubmitError(null);
+    try {
+      const res = await fetch('/api/import-transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pdfImportRows),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setShowPDFImportModal(false);
+        setPDFImportRows([]);
+        fetchTransactions(); // refresh main table
+        setShowImportSuccess(true);
+        setImportedCount(pdfImportRows.length);
+      } else {
+        setPDFImportSubmitError(json.error || 'Import failed.');
+      }
+    } catch (err) {
+      setPDFImportSubmitError('Import failed.');
+    } finally {
+      setPDFImportSubmitLoading(false);
+    }
+  };
+
+  // Update handlePDFOrImage to use the new PDF workflow
   const handlePDFOrImage = async (file: File) => {
-    await triggerWebhook(file);
-    setUploadedFileName(file.name);
-    setUploadComplete(true);
+    if (file.type === 'application/pdf') {
+      await handlePDFUpload(file);
+    } else {
+      await triggerWebhook(file);
+      setUploadedFileName(file.name);
+      setUploadComplete(true);
+    }
   };
 
   // Handle CSV file
@@ -1105,6 +1194,73 @@ export default function Transactions() {
             >
               ×
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* PDF Import Modal */}
+      {showPDFImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" onClick={() => setShowPDFImportModal(false)}>
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-4xl p-6 relative" onClick={e => e.stopPropagation()}>
+            <h2 className="text-xl font-semibold mb-4">Review & Edit Imported Transactions (PDF)</h2>
+            {pdfImportLoading ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <div className="mb-4"><span className="animate-spin inline-block w-8 h-8 border-4 border-blue-400 border-t-transparent rounded-full"></span></div>
+                <div className="text-gray-700">Processing PDF, please wait...</div>
+              </div>
+            ) : pdfImportError ? (
+              <div className="mb-4 text-red-600">{pdfImportError}</div>
+            ) : (
+              <>
+                <div className="overflow-x-auto mb-4">
+                  <table className="min-w-full text-sm border">
+                    <thead>
+                      <tr>
+                        <th className="px-2 py-1 border-b">Date</th>
+                        <th className="px-2 py-1 border-b">Description</th>
+                        <th className="px-2 py-1 border-b">Amount</th>
+                        <th className="px-2 py-1 border-b">Category</th>
+                        <th className="px-2 py-1 border-b">Document ID</th>
+                        <th className="px-2 py-1 border-b">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pdfImportRows.map((row, idx) => (
+                        <tr key={idx}>
+                          <td className="px-2 py-1 border-b">
+                            <input type="date" value={row.date || ''} onChange={e => handlePDFImportCellChange(idx, 'date', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
+                          </td>
+                          <td className="px-2 py-1 border-b">
+                            <input type="text" value={row.description || ''} onChange={e => handlePDFImportCellChange(idx, 'description', e.target.value)} className="w-40 border rounded px-1 py-0.5" />
+                          </td>
+                          <td className="px-2 py-1 border-b">
+                            <input type="number" value={row.amount} onChange={e => handlePDFImportCellChange(idx, 'amount', e.target.value)} className="w-24 border rounded px-1 py-0.5" />
+                          </td>
+                          <td className="px-2 py-1 border-b">
+                            <input type="text" value={row.category || ''} onChange={e => handlePDFImportCellChange(idx, 'category', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
+                          </td>
+                          <td className="px-2 py-1 border-b">
+                            <input type="text" value={row.document_id || ''} onChange={e => handlePDFImportCellChange(idx, 'document_id', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
+                          </td>
+                          <td className="px-2 py-1 border-b">
+                            <button onClick={() => handlePDFImportDeleteRow(idx)} className="text-red-600 hover:text-red-900">Delete</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex gap-2 mb-4">
+                  <button onClick={handlePDFImportAddRow} className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm border border-gray-300">Add Row</button>
+                </div>
+                {pdfImportSubmitError && <div className="mb-2 text-red-600">{pdfImportSubmitError}</div>}
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setShowPDFImportModal(false)} className="px-4 py-2 rounded-md border border-gray-300 text-gray-700">Cancel</button>
+                  <button onClick={handleSubmitPDFImport} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700" disabled={pdfImportSubmitLoading}>{pdfImportSubmitLoading ? 'Importing...' : 'Import to Database'}</button>
+                </div>
+              </>
+            )}
+            <button className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none" onClick={() => setShowPDFImportModal(false)} aria-label="Close">×</button>
           </div>
         </div>
       )}
