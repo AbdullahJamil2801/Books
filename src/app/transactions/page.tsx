@@ -414,7 +414,7 @@ export default function Transactions() {
       } else {
         throw new Error('Invalid response from Make.com');
       }
-    } catch (err) {
+    } catch {
       setPDFImportError('Failed to process PDF. Please try again.');
     } finally {
       setPDFImportLoading(false);
@@ -461,7 +461,7 @@ export default function Transactions() {
       } else {
         setPDFImportSubmitError(json.error || 'Import failed.');
       }
-    } catch (err) {
+    } catch {
       setPDFImportSubmitError('Import failed.');
     } finally {
       setPDFImportSubmitLoading(false);
