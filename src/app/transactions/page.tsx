@@ -557,7 +557,7 @@ export default function Transactions() {
   const validateCSVRows = useCallback(() => {
     const errors: string[] = [];
     // Required fields must be mapped
-    const required = ['date', 'description', 'amount'];
+    const required = ['date', 'amount'];
     for (const req of required) {
       if (!csvMappings.some(m => m.dest === req && m.source)) {
         errors.push(`Please map a column to required field: ${req}`);
@@ -580,7 +580,6 @@ export default function Transactions() {
       const ymd = toYYYYMMDD(dateVal);
       if (!dateVal) errors.push(`Row ${rowNum}: Missing date.`);
       if (dateVal && !ymd) errors.push(`Row ${rowNum}: Invalid date format (${dateVal}). Use YYYY-MM-DD or a recognizable date.`);
-      if (!get('description')) errors.push(`Row ${rowNum}: Missing description.`);
       if (!get('amount')) errors.push(`Row ${rowNum}: Missing amount.`);
       if (get('amount') && isNaN(parseFloat(get('amount')))) errors.push(`Row ${rowNum}: Invalid amount (${get('amount')}).`);
     });
@@ -710,7 +709,6 @@ export default function Transactions() {
                     value={formData.date}
                     onChange={handleChange}
                     className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    required
                   />
                 </div>
                 <div>
@@ -725,7 +723,6 @@ export default function Transactions() {
                     onChange={handleChange}
                     placeholder="Enter transaction description"
                     className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    required
                   />
                 </div>
                 <div>
@@ -741,7 +738,6 @@ export default function Transactions() {
                     placeholder="0.00"
                     step="0.01"
                     className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    required
                   />
                 </div>
                 <div>

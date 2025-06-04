@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
 
     // Validate required fields
     for (const t of transactions) {
-      if (!t.date || !t.description || typeof t.amount !== 'number') {
+      if (!t.date || typeof t.amount !== 'number') {
         return NextResponse.json({ error: 'Missing required fields in one or more transactions.' }, { status: 400 });
       }
     }
