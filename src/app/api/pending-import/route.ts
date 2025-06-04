@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// Define a specific type for pending import
+interface PendingTransaction {
+  date: string;
+  description: string;
+  amount: number;
+  category?: string | null;
+  document_id?: string;
+}
+
 // In-memory store for demo (replace with DB or Redis for production)
-let pendingImport: any[] | null = null;
+let pendingImport: PendingTransaction[] | null = null;
 
 export async function POST(req: NextRequest) {
   try {
