@@ -827,95 +827,97 @@ export default function Transactions() {
                 No transactions yet
               </div>
             ) : (
-              <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-3">
-                        <input
-                          type="checkbox"
-                          checked={allSelected}
-                          onChange={toggleSelectAll}
-                          aria-label="Select all transactions"
-                        />
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Date
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Description
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Category
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Document ID
-                      </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Amount
-                      </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredTransactions.map((transaction) => (
-                      <tr key={transaction.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-4 text-center">
+              <div className="overflow-x-auto">
+                <div className="max-h-[600px] overflow-y-auto min-w-full">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3">
                           <input
                             type="checkbox"
-                            checked={selectedIds.includes(transaction.id)}
-                            onChange={() => toggleSelect(transaction.id)}
-                            aria-label={`Select transaction ${transaction.id}`}
+                            checked={allSelected}
+                            onChange={toggleSelectAll}
+                            aria-label="Select all transactions"
                           />
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {new Date(transaction.date).toLocaleDateString()}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {transaction.description}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {transaction.category || '-'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {transaction.document_id || '-'}
-                        </td>
-                        <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-medium ${
-                          transaction.amount < 0 ? 'text-red-600' : 'text-green-600'
-                        }`}>
-                          ${Math.abs(transaction.amount).toFixed(2)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
-                          <div className="flex justify-end gap-2">
-                            <button
-                              onClick={() => {
-                                setEditingId(transaction.id);
-                                setFormData({
-                                  date: transaction.date,
-                                  description: transaction.description,
-                                  amount: transaction.amount.toString(),
-                                  category: transaction.category || '',
-                                  document_id: transaction.document_id || '',
-                                });
-                              }}
-                              className="text-blue-600 hover:text-blue-900 focus:outline-none focus:underline"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => openDeleteConfirm(transaction.id)}
-                              className="text-red-600 hover:text-red-900 focus:outline-none focus:underline"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Date
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Description
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Category
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Document ID
+                        </th>
+                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Amount
+                        </th>
+                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredTransactions.map((transaction) => (
+                        <tr key={transaction.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-4 text-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.includes(transaction.id)}
+                              onChange={() => toggleSelect(transaction.id)}
+                              aria-label={`Select transaction ${transaction.id}`}
+                            />
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {new Date(transaction.date).toLocaleDateString()}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {transaction.description}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {transaction.category || '-'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {transaction.document_id || '-'}
+                          </td>
+                          <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-medium ${
+                            transaction.amount < 0 ? 'text-red-600' : 'text-green-600'
+                          }`}>
+                            ${Math.abs(transaction.amount).toFixed(2)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
+                            <div className="flex justify-end gap-2">
+                              <button
+                                onClick={() => {
+                                  setEditingId(transaction.id);
+                                  setFormData({
+                                    date: transaction.date,
+                                    description: transaction.description,
+                                    amount: transaction.amount.toString(),
+                                    category: transaction.category || '',
+                                    document_id: transaction.document_id || '',
+                                  });
+                                }}
+                                className="text-blue-600 hover:text-blue-900 focus:outline-none focus:underline"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => openDeleteConfirm(transaction.id)}
+                                className="text-red-600 hover:text-red-900 focus:outline-none focus:underline"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
