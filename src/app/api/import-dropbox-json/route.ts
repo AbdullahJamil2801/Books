@@ -14,7 +14,9 @@ export async function GET(req: NextRequest) {
     const data = await res.json();
     // Optionally validate/normalize data here
     return NextResponse.json({ data });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Failed to fetch or parse JSON' }, { status: 500 });
+  } catch (err: unknown) {
+    let message = 'Failed to fetch or parse JSON';
+    if (err instanceof Error) message = err.message;
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 } 
