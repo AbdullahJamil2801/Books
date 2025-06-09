@@ -676,8 +676,10 @@ export default function Transactions() {
       const json = await res.json();
       if (!Array.isArray(json.data)) throw new Error('Invalid JSON format');
       setDropboxRows(json.data);
-    } catch (err: any) {
-      setDropboxError(err.message || 'Failed to fetch or parse JSON.');
+    } catch (err: unknown) {
+      let message = 'Failed to fetch or parse JSON.';
+      if (err instanceof Error) message = err.message;
+      setDropboxError(message);
     } finally {
       setDropboxLoading(false);
     }
