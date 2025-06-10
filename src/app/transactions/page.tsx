@@ -664,13 +664,6 @@ export default function Transactions() {
     return () => clearInterval(interval);
   }, [pendingImportId]);
 
-  // Handler to open Dropbox modal
-  const openDropboxModal = () => {
-    setShowDropboxModal(true);
-    setDropboxRows([]);
-    setDropboxImportError(null);
-  };
-
   // Handler to close Dropbox modal
   const closeDropboxModal = async () => {
     setShowDropboxModal(false);
@@ -680,33 +673,6 @@ export default function Transactions() {
     if (pendingImportId) {
       await supabase.from('pending_imports').update({ imported: true }).eq('id', pendingImportId);
       setPendingImportId(null);
-    }
-  };
-
-  // Handler to fetch JSON from Dropbox
-  const handleFetchDropboxJSON = async () => {
-    setDropboxImportLoading(true);
-    setDropboxImportError(null);
-    setDropboxRows([]);
-    try {
-      // Convert Dropbox share link to direct download link
-      let url = dropboxLink.trim();
-      if (url.includes('www.dropbox.com')) {
-        url = url.replace('www.dropbox.com', 'dl.dropboxusercontent.com');
-        url = url.replace('?dl=0', '');
-        url = url.replace('?dl=1', '');
-      }
-      const res = await fetch(`/api/import-dropbox-json?url=${encodeURIComponent(url)}`);
-      if (!res.ok) throw new Error('Failed to fetch JSON from Dropbox');
-      const json = await res.json();
-      if (!Array.isArray(json.data)) throw new Error('Invalid JSON format');
-      setDropboxRows(json.data);
-    } catch (err: unknown) {
-      let message = 'Failed to fetch or parse JSON.';
-      if (err instanceof Error) message = err.message;
-      setDropboxImportError(message);
-    } finally {
-      setDropboxImportLoading(false);
     }
   };
 
