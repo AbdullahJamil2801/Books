@@ -1230,4 +1230,139 @@ export default function Transactions() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
           <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
             <h2 className="text-xl font-semibold mb-4">Confirm Deletion</h2>
-            <p className="mb-6">Are you sure you want to delete {deleteTarget === 'bulk' ? `${selectedIds.length} selected transactions`
+            <p className="mb-6">Are you sure you want to delete {deleteTarget === 'bulk' ? `${selectedIds.length} selected transactions` : `this transaction`}?</p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                onClick={closeAllModals}
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dropbox Import Modal */}
+      {showDropboxModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40"
+          onClick={closeDropboxModal}
+        >
+          <div
+            className="bg-white rounded-lg shadow-lg w-full max-w-3xl p-6 relative"
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-semibold mb-4">Import Transactions</h2>
+            {/* Close button in top right */}
+            <button
+              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none"
+              onClick={closeDropboxModal}
+              aria-label="Close"
+              type="button"
+            >
+              ×
+            </button>
+            {dropboxImportLoading ? (
+              <div className="p-6 text-center text-gray-500">
+                Importing transactions...
+              </div>
+            ) : dropboxRows.length === 0 ? (
+              <div className="p-6 text-center text-gray-500">
+                No transactions to import
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <div className="max-h-[600px] overflow-y-auto min-w-full">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Date
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Description
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Amount
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Category
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Document ID
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {dropboxRows.map((transaction) => (
+                        <tr key={transaction.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {new Date(transaction.date).toLocaleDateString()}
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {transaction.description}
+                          </td>
+                          <td className={`px-4 py-4 whitespace-nowrap text-sm text-right font-medium ${
+                            transaction.amount < 0 ? 'text-red-600' : 'text-green-600'
+                          }`}>
+                            ${Math.abs(transaction.amount).toFixed(2)}
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {transaction.category || '-'}
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {transaction.document_id || '-'}
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap text-sm text-right">
+                            <div className="flex justify-end gap-2">
+                              <button
+                                onClick={() => {
+                                  handleDropboxImportCellChange(dropboxRows.indexOf(transaction), 'amount', transaction.amount.toString());
+                                }}
+                                className="text-blue-600 hover:text-blue-900 focus:outline-none focus:underline"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDropboxImportDeleteRow(dropboxRows.indexOf(transaction))}
+                                className="text-red-600 hover:text-red-900 focus:outline-none focus:underline"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleSubmitDropboxImport}
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                disabled={dropboxImportLoading}
+              >
+                {dropboxImportLoading ? 'Importing...' : 'Import'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
