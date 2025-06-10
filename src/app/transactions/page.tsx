@@ -633,9 +633,6 @@ export default function Transactions() {
 
   // Add state for Dropbox JSON import modal
   const [showDropboxModal, setShowDropboxModal] = useState(false);
-  const [dropboxLink, setDropboxLink] = useState('');
-  const [dropboxLoading, setDropboxLoading] = useState(false);
-  const [dropboxError, setDropboxError] = useState<string | null>(null);
   const [dropboxRows, setDropboxRows] = useState<Transaction[]>([]);
   const [dropboxImportLoading, setDropboxImportLoading] = useState(false);
   const [dropboxImportError, setDropboxImportError] = useState<string | null>(null);
@@ -670,50 +667,15 @@ export default function Transactions() {
   // Handler to open Dropbox modal
   const openDropboxModal = () => {
     setShowDropboxModal(true);
-    setDropboxLink('');
-    setDropboxRows([]);
-    setDropboxError(null);
-    setDropboxImportError(null);
   };
 
   // Handler to close Dropbox modal
   const closeDropboxModal = async () => {
     setShowDropboxModal(false);
-    setDropboxLink('');
-    setDropboxRows([]);
-    setDropboxError(null);
-    setDropboxImportError(null);
     // Mark as imported in Supabase if a pending import was open
     if (pendingImportId) {
       await supabase.from('pending_imports').update({ imported: true }).eq('id', pendingImportId);
       setPendingImportId(null);
-    }
-  };
-
-  // Handler to fetch JSON from Dropbox
-  const handleFetchDropboxJSON = async () => {
-    setDropboxLoading(true);
-    setDropboxError(null);
-    setDropboxRows([]);
-    try {
-      // Convert Dropbox share link to direct download link
-      let url = dropboxLink.trim();
-      if (url.includes('www.dropbox.com')) {
-        url = url.replace('www.dropbox.com', 'dl.dropboxusercontent.com');
-        url = url.replace('?dl=0', '');
-        url = url.replace('?dl=1', '');
-      }
-      const res = await fetch(`/api/import-dropbox-json?url=${encodeURIComponent(url)}`);
-      if (!res.ok) throw new Error('Failed to fetch JSON from Dropbox');
-      const json = await res.json();
-      if (!Array.isArray(json.data)) throw new Error('Invalid JSON format');
-      setDropboxRows(json.data);
-    } catch (err: unknown) {
-      let message = 'Failed to fetch or parse JSON.';
-      if (err instanceof Error) message = err.message;
-      setDropboxError(message);
-    } finally {
-      setDropboxLoading(false);
     }
   };
 
@@ -798,13 +760,6 @@ export default function Transactions() {
                 className="bg-white px-4 py-2 rounded-md border border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-gray-700"
               >
                 Import CSV
-              </button>
-              <button
-                type="button"
-                onClick={openDropboxModal}
-                className="bg-white px-4 py-2 rounded-md border border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-gray-700"
-              >
-                Import Dropbox JSON
               </button>
               <div className="relative">
                 <button
@@ -1448,26 +1403,8 @@ export default function Transactions() {
             >
               ×
             </button>
-            <div className="mb-4">
-              <label className="block font-medium mb-2">Dropbox JSON Link</label>
-              <input
-                type="text"
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Paste Dropbox share link here..."
-                value={dropboxLink}
-                onChange={e => setDropboxLink(e.target.value)}
-              />
-              <button
-                type="button"
-                onClick={handleFetchDropboxJSON}
-                className="mt-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                disabled={dropboxLoading || !dropboxLink}
-              >
-                {dropboxLoading ? 'Fetching...' : 'Fetch & Preview'}
-              </button>
-              {dropboxError && <div className="mt-2 text-red-600">{dropboxError}</div>}
-            </div>
-            {dropboxRows.length > 0 && (
+            {/* Only show the table and import/cancel buttons, no Dropbox link input */}
+            {dropboxRows.length > 0 ? (
               <>
                 <div className="overflow-x-auto mb-4">
                   <div className="max-h-[400px] md:max-h-[50vh] overflow-y-auto">
@@ -1550,6 +1487,8 @@ export default function Transactions() {
                   <button onClick={handleSubmitDropboxImport} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700" disabled={!isDropboxImportValid || dropboxImportLoading}>{dropboxImportLoading ? 'Importing...' : 'Import to Database'}</button>
                 </div>
               </>
+            ) : (
+              <div className="text-gray-500">No transactions to import.</div>
             )}
           </div>
         </div>
