@@ -645,7 +645,6 @@ export default function Transactions() {
 
   // Poll Supabase for new pending imports every 10 seconds
   useEffect(() => {
-    let interval: NodeJS.Timeout;
     const pollPendingImports = async () => {
       const { data, error } = await supabase
         .from('pending_imports')
@@ -664,7 +663,7 @@ export default function Transactions() {
       }
     };
     pollPendingImports();
-    interval = setInterval(pollPendingImports, 10000);
+    const interval = setInterval(pollPendingImports, 10000);
     return () => clearInterval(interval);
   }, [pendingImportId]);
 
