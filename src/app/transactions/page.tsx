@@ -677,12 +677,17 @@ export default function Transactions() {
   };
 
   // Handler to close Dropbox modal
-  const closeDropboxModal = () => {
+  const closeDropboxModal = async () => {
     setShowDropboxModal(false);
     setDropboxLink('');
     setDropboxRows([]);
     setDropboxError(null);
     setDropboxImportError(null);
+    // Mark as imported in Supabase if a pending import was open
+    if (pendingImportId) {
+      await supabase.from('pending_imports').update({ imported: true }).eq('id', pendingImportId);
+      setPendingImportId(null);
+    }
   };
 
   // Handler to fetch JSON from Dropbox
