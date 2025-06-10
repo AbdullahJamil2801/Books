@@ -640,6 +640,34 @@ export default function Transactions() {
   const [dropboxImportLoading, setDropboxImportLoading] = useState(false);
   const [dropboxImportError, setDropboxImportError] = useState<string | null>(null);
 
+  // Add state for pending import polling
+  const [pendingImportId, setPendingImportId] = useState<string | null>(null);
+
+  // Poll Supabase for new pending imports every 10 seconds
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    const pollPendingImports = async () => {
+      const { data, error } = await supabase
+        .from('pending_imports')
+        .select('*')
+        .eq('imported', false)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (!error && data && data.length > 0) {
+        const importRow = data[0];
+        // Only open modal if not already open for this import
+        if (importRow.id !== pendingImportId) {
+          setDropboxRows(importRow.data || []);
+          setShowDropboxModal(true);
+          setPendingImportId(importRow.id);
+        }
+      }
+    };
+    pollPendingImports();
+    interval = setInterval(pollPendingImports, 10000);
+    return () => clearInterval(interval);
+  }, [pendingImportId]);
+
   // Handler to open Dropbox modal
   const openDropboxModal = () => {
     setShowDropboxModal(true);
@@ -722,6 +750,11 @@ export default function Transactions() {
         fetchTransactions(); // refresh main table
         setShowImportSuccess(true);
         setImportedCount(dropboxRows.length);
+        // Mark as imported in Supabase
+        if (pendingImportId) {
+          await supabase.from('pending_imports').update({ imported: true }).eq('id', pendingImportId);
+          setPendingImportId(null);
+        }
       } else {
         setDropboxImportError(json.error || 'Import failed.');
       }
