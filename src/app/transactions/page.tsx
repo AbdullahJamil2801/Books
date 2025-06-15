@@ -87,13 +87,29 @@ export default function Transactions() {
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  // Select all toggle
-  const allSelected = transactions.length > 0 && selectedIds.length === transactions.length;
+  // Search state
+  const [search, setSearch] = useState('');
+
+  // Filtered transactions
+  const filteredTransactions = transactions.filter(t => {
+    const searchLower = search.toLowerCase();
+    return (
+      t.description.toLowerCase().includes(searchLower) ||
+      (t.category ? t.category.toLowerCase().includes(searchLower) : false) ||
+      t.amount.toString().includes(searchLower)
+    );
+  });
+
+  // Select all toggle (filtered only)
+  const allFilteredSelected = filteredTransactions.length > 0 && filteredTransactions.every(t => selectedIds.includes(t.id));
   const toggleSelectAll = () => {
-    if (allSelected) {
-      setSelectedIds([]);
+    if (allFilteredSelected) {
+      setSelectedIds(selectedIds.filter(id => !filteredTransactions.some(t => t.id === id)));
     } else {
-      setSelectedIds(transactions.map(t => t.id));
+      setSelectedIds([
+        ...selectedIds,
+        ...filteredTransactions.map(t => t.id).filter(id => !selectedIds.includes(id))
+      ]);
     }
   };
 
@@ -210,19 +226,6 @@ export default function Transactions() {
 
   // Dropdown state
   const [downloadOpen, setDownloadOpen] = useState(false);
-
-  // Search state
-  const [search, setSearch] = useState('');
-
-  // Filtered transactions
-  const filteredTransactions = transactions.filter(t => {
-    const searchLower = search.toLowerCase();
-    return (
-      t.description.toLowerCase().includes(searchLower) ||
-      (t.category ? t.category.toLowerCase().includes(searchLower) : false) ||
-      t.amount.toString().includes(searchLower)
-    );
-  });
 
   // Fetch transactions on component mount
   useEffect(() => {
@@ -651,6 +654,60 @@ export default function Transactions() {
     ]);
   };
 
+  // Bulk Edit Modal State
+  const [showBulkEditModal, setShowBulkEditModal] = useState(false);
+  const [bulkEditCategory, setBulkEditCategory] = useState('');
+  const [bulkEditDescription, setBulkEditDescription] = useState('');
+  const [bulkEditLoading, setBulkEditLoading] = useState(false);
+  const [bulkEditError, setBulkEditError] = useState<string | null>(null);
+
+  // Handler to open bulk edit modal
+  const openBulkEditModal = () => {
+    setBulkEditCategory('');
+    setBulkEditDescription('');
+    setBulkEditError(null);
+    setShowBulkEditModal(true);
+  };
+
+  // Handler to close bulk edit modal
+  const closeBulkEditModal = () => {
+    setShowBulkEditModal(false);
+    setBulkEditCategory('');
+    setBulkEditDescription('');
+    setBulkEditError(null);
+  };
+
+  // Handler to submit bulk edit
+  const handleBulkEdit = async () => {
+    if (!bulkEditCategory && !bulkEditDescription) {
+      setBulkEditError('Please provide a new Category and/or Description.');
+      return;
+    }
+    setBulkEditLoading(true);
+    setBulkEditError(null);
+    const updates: any = {};
+    if (bulkEditCategory) updates.category = bulkEditCategory;
+    if (bulkEditDescription) updates.description = bulkEditDescription;
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .update(updates)
+        .in('id', selectedIds);
+      if (error) throw error;
+      setTransactions(prev => prev.map(t =>
+        selectedIds.includes(t.id)
+          ? { ...t, ...updates }
+          : t
+      ));
+      setSelectedIds([]);
+      closeBulkEditModal();
+    } catch (error) {
+      setBulkEditError('Error updating transactions. Please try again.');
+    } finally {
+      setBulkEditLoading(false);
+    }
+  };
+
   return (
     <>
       <main className="min-h-screen flex">
@@ -830,12 +887,20 @@ export default function Transactions() {
             <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
               <h2 className="text-xl font-semibold">Transaction History</h2>
               {selectedIds.length > 0 && (
-                <button
-                  onClick={() => openDeleteConfirm('bulk')}
-                  className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-                >
-                  Delete Selected ({selectedIds.length})
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={openBulkEditModal}
+                    className="bg-yellow-500 text-white px-4 py-2 rounded-md hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2"
+                  >
+                    Bulk Edit
+                  </button>
+                  <button
+                    onClick={() => openDeleteConfirm('bulk')}
+                    className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                  >
+                    Delete Selected ({selectedIds.length})
+                  </button>
+                </div>
               )}
             </div>
             {isLoading ? (
@@ -855,7 +920,7 @@ export default function Transactions() {
                         <th className="px-4 py-3">
                           <input
                             type="checkbox"
-                            checked={allSelected}
+                            checked={allFilteredSelected}
                             onChange={toggleSelectAll}
                             aria-label="Select all transactions"
                           />
@@ -1302,6 +1367,69 @@ export default function Transactions() {
               </>
             )}
             <button className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none" onClick={handleDiscardPDFImport} aria-label="Close">×</button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Edit Modal */}
+      {showBulkEditModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
+            <h2 className="text-xl font-semibold mb-4">Bulk Edit Transactions</h2>
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="bulkEditCategory" className="block text-sm font-medium text-gray-700 mb-1">
+                  Category
+                </label>
+                <select
+                  id="bulkEditCategory"
+                  name="bulkEditCategory"
+                  value={bulkEditCategory}
+                  onChange={e => setBulkEditCategory(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">Select a category</option>
+                  {CATEGORIES.map(category => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="bulkEditDescription" className="block text-sm font-medium text-gray-700 mb-1">
+                  Description
+                </label>
+                <input
+                  type="text"
+                  id="bulkEditDescription"
+                  name="bulkEditDescription"
+                  value={bulkEditDescription}
+                  onChange={e => setBulkEditDescription(e.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeBulkEditModal}
+                className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkEdit}
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                disabled={bulkEditLoading}
+              >
+                {bulkEditLoading ? 'Updating...' : 'Update Transactions'}
+              </button>
+            </div>
+            {bulkEditError && (
+              <div className="mt-2 text-red-600">{bulkEditError}</div>
+            )}
           </div>
         </div>
       )}
