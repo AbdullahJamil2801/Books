@@ -3,14 +3,33 @@ import { supabase } from '@/utils/supabaseClient';
 
 export async function POST(req: NextRequest) {
   try {
-    const { id, data } = await req.json();
-    if (!id || !Array.isArray(data)) {
-      return NextResponse.json({ error: 'Expected id and data (array of transactions).' }, { status: 400 });
+    const body = await req.json();
+    const { id, data, dropbox_link } = body;
+    if (!id) {
+      return NextResponse.json({ error: 'Missing id (importId) parameter.' }, { status: 400 });
+    }
+    let transactions = data;
+    // If dropbox_link is provided, fetch the JSON from Dropbox
+    if (dropbox_link) {
+      let url = dropbox_link.trim();
+      if (url.includes('www.dropbox.com')) {
+        url = url.replace('www.dropbox.com', 'dl.dropboxusercontent.com');
+        url = url.replace('?dl=0', '');
+        url = url.replace('?dl=1', '');
+      }
+      const res = await fetch(url);
+      if (!res.ok) {
+        return NextResponse.json({ error: 'Failed to fetch file from Dropbox' }, { status: 400 });
+      }
+      transactions = await res.json();
+    }
+    if (!Array.isArray(transactions)) {
+      return NextResponse.json({ error: 'Expected data (array of transactions) from Dropbox or direct.' }, { status: 400 });
     }
     // Upsert the pending import
     const { error } = await supabase
       .from('pending_imports')
-      .upsert([{ id, data }]);
+      .upsert([{ id, data: transactions }]);
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
