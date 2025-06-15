@@ -685,7 +685,7 @@ export default function Transactions() {
     }
     setBulkEditLoading(true);
     setBulkEditError(null);
-    const updates: any = {};
+    const updates: { category?: string | null; description?: string; } = {};
     if (bulkEditCategory) updates.category = bulkEditCategory;
     if (bulkEditDescription) updates.description = bulkEditDescription;
     try {
@@ -701,9 +701,12 @@ export default function Transactions() {
       ));
       setSelectedIds([]);
       closeBulkEditModal();
-    } catch (error) {
-      setBulkEditError('Error updating transactions. Please try again.');
-    } finally {
+    } catch (error: unknown) {
+      let message = 'Error updating transactions. Please try again.';
+      if (error instanceof Error) {
+        message = error.message;
+      }
+      setBulkEditError(message);
       setBulkEditLoading(false);
     }
   };
