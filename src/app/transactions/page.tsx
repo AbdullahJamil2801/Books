@@ -390,66 +390,58 @@ export default function Transactions() {
   const [pdfImportRows, setPDFImportRows] = useState<Transaction[]>([]);
   const [pdfImportSubmitLoading, setPDFImportSubmitLoading] = useState(false);
   const [pdfImportSubmitError, setPDFImportSubmitError] = useState<string | null>(null);
+  const [pendingImportId, setPendingImportId] = useState<string | null>(null);
 
-  // Handler for PDF upload (replaces handlePDFOrImage for PDFs)
+  // Handler for PDF upload (triggers Make/Google Drive flow)
   const handlePDFUpload = async (file: File) => {
     setShowPDFImportModal(true);
     setPDFImportLoading(true);
     setPDFImportError(null);
     setPDFImportRows([]);
     const importId = crypto.randomUUID();
+    setPendingImportId(importId);
     try {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('importId', importId);
-      // Send to Make.com webhook (Make.com should POST result to /api/pending-import with { id: importId, data })
-      fetch('https://hook.us2.make.com/aov8f1zsnyd6nexiktuk8t5206x2th4g', {
+      // Send to Make.com webhook (Make.com will POST result to /api/pending-import)
+      await fetch('https://hook.us2.make.com/aov8f1zsnyd6nexiktuk8t5206x2th4g', {
         method: 'POST',
         body: formData,
       });
-      // Poll for result
-      let found = false;
-      for (let i = 0; i < 30; i++) { // poll for up to 60 seconds (30 * 2s)
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        const res = await fetch(`/api/pending-import?id=${importId}`);
-        const json = await res.json();
-        if (json.data && Array.isArray(json.data)) {
-          setPDFImportRows(json.data);
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        setPDFImportError('Timed out waiting for PDF processing. Please try again.');
-      }
+      // Loader modal will remain open until POST is received
     } catch {
       setPDFImportError('Failed to process PDF. Please try again.');
-    } finally {
       setPDFImportLoading(false);
     }
   };
 
-  // Handler to update a cell in the PDF import table
-  const handlePDFImportCellChange = (rowIdx: number, field: keyof Transaction, value: string) => {
-    setPDFImportRows(prev => prev.map((row, idx) =>
-      idx === rowIdx ? { ...row, [field]: field === 'amount' ? parseFloat(value) : value } : row
-    ));
-  };
+  // Listen for POST from Make/Google Drive (via /api/pending-import)
+  useEffect(() => {
+    if (!pendingImportId) return;
+    // Setup a simple polling or websocket if available, but here we use polling for demo
+    let interval: NodeJS.Timeout;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/pending-import?id=${pendingImportId}`);
+        const json = await res.json();
+        if (json.data && Array.isArray(json.data)) {
+          setPDFImportRows(json.data);
+          setPDFImportLoading(false); // Close loader
+          setPendingImportId(null);
+        } else if (!cancelled) {
+          interval = setTimeout(poll, 2000);
+        }
+      } catch {
+        if (!cancelled) interval = setTimeout(poll, 2000);
+      }
+    };
+    poll();
+    return () => { cancelled = true; if (interval) clearTimeout(interval); };
+  }, [pendingImportId]);
 
-  // Handler to delete a row from PDF import
-  const handlePDFImportDeleteRow = (rowIdx: number) => {
-    setPDFImportRows(prev => prev.filter((_, idx) => idx !== rowIdx));
-  };
-
-  // Handler to add a new row
-  const handlePDFImportAddRow = () => {
-    setPDFImportRows(prev => [
-      ...prev,
-      { id: '', date: '', description: '', amount: 0, category: '', document_id: '' }
-    ]);
-  };
-
-  // Handler to submit PDF import data to Supabase
+  // Handler to accept and import PDF data
   const handleSubmitPDFImport = async () => {
     setPDFImportSubmitLoading(true);
     setPDFImportSubmitError(null);
@@ -474,6 +466,14 @@ export default function Transactions() {
     } finally {
       setPDFImportSubmitLoading(false);
     }
+  };
+
+  // Handler to discard PDF import
+  const handleDiscardPDFImport = () => {
+    setShowPDFImportModal(false);
+    setPDFImportRows([]);
+    setPendingImportId(null);
+    setPDFImportLoading(false);
   };
 
   // Update handlePDFOrImage to use the new PDF workflow
@@ -631,106 +631,25 @@ export default function Transactions() {
     row => row.date && row.date !== '' && row.amount !== undefined && row.amount !== null
   );
 
-  // Add state for Dropbox JSON import modal
-  const [showDropboxModal, setShowDropboxModal] = useState(false);
-  const [dropboxRows, setDropboxRows] = useState<Transaction[]>([]);
-  const [dropboxImportLoading, setDropboxImportLoading] = useState(false);
-  const [dropboxImportError, setDropboxImportError] = useState<string | null>(null);
-
-  // Add state for pending import polling
-  const [pendingImportId, setPendingImportId] = useState<string | null>(null);
-
-  // Poll Supabase for new pending imports every 10 seconds
-  useEffect(() => {
-    const pollPendingImports = async () => {
-      const { data, error } = await supabase
-        .from('pending_imports')
-        .select('*')
-        .eq('imported', false)
-        .order('created_at', { ascending: false })
-        .limit(1);
-      if (!error && data && data.length > 0) {
-        const importRow = data[0];
-        // Only open modal if not already open for this import
-        if (importRow.id !== pendingImportId) {
-          setDropboxRows(importRow.data || []);
-          setShowDropboxModal(true);
-          setPendingImportId(importRow.id);
-        }
-      }
-    };
-    pollPendingImports();
-    const interval = setInterval(pollPendingImports, 10000);
-    return () => clearInterval(interval);
-  }, [pendingImportId]);
-
-  // Handler to close Dropbox modal
-  const closeDropboxModal = async () => {
-    setShowDropboxModal(false);
-    setDropboxRows([]);
-    setDropboxImportError(null);
-    // Mark as imported in Supabase if a pending import was open
-    if (pendingImportId) {
-      await supabase.from('pending_imports').update({ imported: true }).eq('id', pendingImportId);
-      setPendingImportId(null);
-    }
-  };
-
-  // Handler to update a cell in the Dropbox import table
-  const handleDropboxImportCellChange = (rowIdx: number, field: keyof Transaction, value: string) => {
-    setDropboxRows(prev => prev.map((row, idx) =>
+  // Handler to update a cell in the PDF import table
+  const handlePDFImportCellChange = (rowIdx: number, field: keyof Transaction, value: string) => {
+    setPDFImportRows(prev => prev.map((row, idx) =>
       idx === rowIdx ? { ...row, [field]: field === 'amount' ? parseFloat(value) : value } : row
     ));
   };
 
-  // Handler to delete a row from Dropbox import
-  const handleDropboxImportDeleteRow = (rowIdx: number) => {
-    setDropboxRows(prev => prev.filter((_, idx) => idx !== rowIdx));
+  // Handler to delete a row from PDF import
+  const handlePDFImportDeleteRow = (rowIdx: number) => {
+    setPDFImportRows(prev => prev.filter((_, idx) => idx !== rowIdx));
   };
 
   // Handler to add a new row
-  const handleDropboxImportAddRow = () => {
-    setDropboxRows(prev => [
+  const handlePDFImportAddRow = () => {
+    setPDFImportRows(prev => [
       ...prev,
       { id: '', date: '', description: '', amount: 0, category: '', document_id: '' }
     ]);
   };
-
-  // Handler to submit Dropbox import data to Supabase
-  const handleSubmitDropboxImport = async () => {
-    setDropboxImportLoading(true);
-    setDropboxImportError(null);
-    try {
-      const res = await fetch('/api/import-transactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dropboxRows),
-      });
-      const json = await res.json();
-      if (json.success) {
-        setShowDropboxModal(false);
-        setDropboxRows([]);
-        fetchTransactions(); // refresh main table
-        setShowImportSuccess(true);
-        setImportedCount(dropboxRows.length);
-        // Mark as imported in Supabase
-        if (pendingImportId) {
-          await supabase.from('pending_imports').update({ imported: true }).eq('id', pendingImportId);
-          setPendingImportId(null);
-        }
-      } else {
-        setDropboxImportError(json.error || 'Import failed.');
-      }
-    } catch {
-      setDropboxImportError('Import failed.');
-    } finally {
-      setDropboxImportLoading(false);
-    }
-  };
-
-  const isDropboxImportValid = dropboxRows.every(
-    row => row.date && row.date !== '' && row.amount !== undefined && row.amount !== null
-  );
 
   return (
     <>
@@ -1314,7 +1233,7 @@ export default function Transactions() {
 
       {/* PDF Import Modal */}
       {showPDFImportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" onClick={() => setShowPDFImportModal(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" onClick={handleDiscardPDFImport}>
           <div className="bg-white rounded-lg shadow-lg w-full max-w-4xl p-6 relative" onClick={e => e.stopPropagation()}>
             <h2 className="text-xl font-semibold mb-4">Review & Edit Imported Transactions (PDF)</h2>
             {pdfImportLoading ? (
@@ -1377,115 +1296,12 @@ export default function Transactions() {
                   <div className="mb-2 text-red-600">{pdfImportSubmitError}</div>
                 )}
                 <div className="flex justify-end gap-2">
-                  <button onClick={() => setShowPDFImportModal(false)} className="px-4 py-2 rounded-md border border-gray-300 text-gray-700">Cancel</button>
+                  <button onClick={handleDiscardPDFImport} className="px-4 py-2 rounded-md border border-gray-300 text-gray-700">Cancel</button>
                   <button onClick={handleSubmitPDFImport} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700" disabled={!isPDFImportValid || pdfImportSubmitLoading}>{pdfImportSubmitLoading ? 'Importing...' : 'Import to Database'}</button>
                 </div>
               </>
             )}
-            <button className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none" onClick={() => setShowPDFImportModal(false)} aria-label="Close">×</button>
-          </div>
-        </div>
-      )}
-
-      {/* Dropbox Import Modal */}
-      {showDropboxModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" onClick={closeDropboxModal}>
-          <div className="bg-white rounded-lg shadow-lg w-full max-w-4xl p-6 relative" onClick={e => e.stopPropagation()}>
-            <h2 className="text-xl font-semibold mb-4">Import Transactions from Dropbox JSON</h2>
-            <button
-              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none"
-              onClick={closeDropboxModal}
-              aria-label="Close"
-              type="button"
-            >
-              ×
-            </button>
-            {dropboxRows.length > 0 ? (
-              <>
-                <div className="overflow-x-auto mb-4">
-                  <div className="max-h-[400px] md:max-h-[50vh] overflow-y-auto">
-                    <table className="min-w-full text-sm border">
-                      <thead>
-                        <tr>
-                          <th className="px-2 py-1 border-b">Date</th>
-                          <th className="px-2 py-1 border-b">Description</th>
-                          <th className="px-2 py-1 border-b">Amount</th>
-                          <th className="px-2 py-1 border-b">Category</th>
-                          <th className="px-2 py-1 border-b">Document ID</th>
-                          <th className="px-2 py-1 border-b">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dropboxRows.map((row, idx) => (
-                          <tr key={idx}>
-                            <td className="px-2 py-1 border-b">
-                              <input
-                                type="date"
-                                className="w-32 px-2 py-1 border border-gray-300 rounded"
-                                value={row.date}
-                                onChange={e => handleDropboxImportCellChange(idx, 'date', e.target.value)}
-                              />
-                            </td>
-                            <td className="px-2 py-1 border-b">
-                              <input
-                                type="text"
-                                className="w-48 px-2 py-1 border border-gray-300 rounded"
-                                value={row.description}
-                                onChange={e => handleDropboxImportCellChange(idx, 'description', e.target.value)}
-                              />
-                            </td>
-                            <td className="px-2 py-1 border-b">
-                              <input
-                                type="number"
-                                className="w-24 px-2 py-1 border border-gray-300 rounded text-right"
-                                value={row.amount}
-                                onChange={e => handleDropboxImportCellChange(idx, 'amount', e.target.value)}
-                              />
-                            </td>
-                            <td className="px-2 py-1 border-b">
-                              <select
-                                className="w-32 px-2 py-1 border border-gray-300 rounded"
-                                value={row.category || ''}
-                                onChange={e => handleDropboxImportCellChange(idx, 'category', e.target.value)}
-                              >
-                                <option value="">Select</option>
-                                {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                              </select>
-                            </td>
-                            <td className="px-2 py-1 border-b">
-                              <input
-                                type="text"
-                                className="w-32 px-2 py-1 border border-gray-300 rounded"
-                                value={row.document_id || ''}
-                                onChange={e => handleDropboxImportCellChange(idx, 'document_id', e.target.value)}
-                              />
-                            </td>
-                            <td className="px-2 py-1 border-b">
-                              <button onClick={() => handleDropboxImportDeleteRow(idx)} className="text-red-600 hover:text-red-900 focus:outline-none">Delete</button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-                <div className="flex gap-2 mb-4">
-                  <button onClick={handleDropboxImportAddRow} className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm border border-gray-300">Add Row</button>
-                </div>
-                {!isDropboxImportValid && (
-                  <div className="mb-2 text-red-600">Missing required fields in one or more transactions.</div>
-                )}
-                {dropboxImportError && (
-                  <div className="mb-2 text-red-600">{dropboxImportError}</div>
-                )}
-                <div className="flex justify-end gap-2">
-                  <button onClick={closeDropboxModal} className="px-4 py-2 rounded-md border border-gray-300 text-gray-700">Cancel</button>
-                  <button onClick={handleSubmitDropboxImport} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700" disabled={!isDropboxImportValid || dropboxImportLoading}>{dropboxImportLoading ? 'Importing...' : 'Import to Database'}</button>
-                </div>
-              </>
-            ) : (
-              <div className="text-gray-500 text-center py-8">No transactions to import.</div>
-            )}
+            <button className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none" onClick={handleDiscardPDFImport} aria-label="Close">×</button>
           </div>
         </div>
       )}
