@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import React from 'react';
+import { toYYYYMMDD } from '@/utils/dateHelpers';
 
 interface Transaction {
   id: string;
@@ -30,25 +31,6 @@ const CATEGORIES = [
   'Healthcare',
   'Other'
 ] as const;
-
-function toYYYYMMDD(dateStr: string): string | null {
-  if (!dateStr) return null;
-  // Try to parse with Date constructor
-  const d = new Date(dateStr);
-  if (!isNaN(d.getTime())) {
-    // Format to YYYY-MM-DD
-    return d.toISOString().split('T')[0];
-  }
-  // Try common formats: DD/MM/YYYY, MM/DD/YYYY, DD-MM-YYYY, MM-DD-YYYY
-  const parts = dateStr.match(/(\d{1,4})[\/-](\d{1,2})[\/-](\d{1,4})/);
-  if (parts) {
-    const [, p1, p2, p3] = parts;
-    // Heuristic: if year is first or last
-    if (p1.length === 4) return `${p1}-${p2.padStart(2, '0')}-${p3.padStart(2, '0')}`;
-    if (p3.length === 4) return `${p3}-${p2.padStart(2, '0')}-${p1.padStart(2, '0')}`;
-  }
-  return null;
-}
 
 // Add this function to check if file is PDF or image
 const isPDFOrImage = (file: File): boolean => {
@@ -363,8 +345,6 @@ export default function Transactions() {
       const file = e.dataTransfer.files[0];
       if (file.name.endsWith('.csv')) {
         handleCSVFile(file);
-      } else if (isPDFOrImage(file)) {
-        handlePDFOrImage(file);
       }
     }
   };
@@ -380,113 +360,7 @@ export default function Transactions() {
       const file = e.target.files[0];
       if (file.name.endsWith('.csv')) {
         handleCSVFile(file);
-      } else if (isPDFOrImage(file)) {
-        handlePDFOrImage(file);
       }
-    }
-  };
-
-  // Add state for PDF import modal and workflow
-  const [showPDFImportModal, setShowPDFImportModal] = useState(false);
-  const [pdfImportLoading, setPDFImportLoading] = useState(false);
-  const [pdfImportError, setPDFImportError] = useState<string | null>(null);
-  const [pdfImportRows, setPDFImportRows] = useState<Transaction[]>([]);
-  const [pdfImportSubmitLoading, setPDFImportSubmitLoading] = useState(false);
-  const [pdfImportSubmitError, setPDFImportSubmitError] = useState<string | null>(null);
-  const [pendingImportId, setPendingImportId] = useState<string | null>(null);
-
-  // Handler for PDF upload (triggers Make/Google Drive flow)
-  const handlePDFUpload = async (file: File) => {
-    setShowPDFImportModal(true);
-    setPDFImportLoading(true);
-    setPDFImportError(null);
-    setPDFImportRows([]);
-    const importId = crypto.randomUUID();
-    setPendingImportId(importId);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('importId', importId);
-      // Send to Make.com webhook (Make.com will POST result to /api/pending-import)
-      await fetch('https://hook.us2.make.com/aov8f1zsnyd6nexiktuk8t5206x2th4g', {
-        method: 'POST',
-        body: formData,
-      });
-      // Loader modal will remain open until POST is received
-    } catch {
-      setPDFImportError('Failed to process PDF. Please try again.');
-      setPDFImportLoading(false);
-    }
-  };
-
-  // Listen for POST from Make/Google Drive (via /api/pending-import)
-  useEffect(() => {
-    if (!pendingImportId) return;
-    // Setup a simple polling or websocket if available, but here we use polling for demo
-    let interval: NodeJS.Timeout;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/pending-import?id=${pendingImportId}`);
-        const json = await res.json();
-        if (json.data && Array.isArray(json.data)) {
-          setPDFImportRows(json.data);
-          setPDFImportLoading(false); // Close loader
-          setPendingImportId(null);
-        } else if (!cancelled) {
-          interval = setTimeout(poll, 2000);
-        }
-      } catch {
-        if (!cancelled) interval = setTimeout(poll, 2000);
-      }
-    };
-    poll();
-    return () => { cancelled = true; if (interval) clearTimeout(interval); };
-  }, [pendingImportId]);
-
-  // Handler to accept and import PDF data
-  const handleSubmitPDFImport = async () => {
-    setPDFImportSubmitLoading(true);
-    setPDFImportSubmitError(null);
-    try {
-      const res = await fetch('/api/import-transactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(pdfImportRows),
-      });
-      const json = await res.json();
-      if (json.success) {
-        setShowPDFImportModal(false);
-        setPDFImportRows([]);
-        fetchTransactions(); // refresh main table
-        setShowImportSuccess(true);
-        setImportedCount(pdfImportRows.length);
-      } else {
-        setPDFImportSubmitError(json.error || 'Import failed.');
-      }
-    } catch {
-      setPDFImportSubmitError('Import failed.');
-    } finally {
-      setPDFImportSubmitLoading(false);
-    }
-  };
-
-  // Handler to discard PDF import
-  const handleDiscardPDFImport = () => {
-    setShowPDFImportModal(false);
-    setPDFImportRows([]);
-    setPendingImportId(null);
-    setPDFImportLoading(false);
-  };
-
-  // Update handlePDFOrImage to use the new PDF workflow
-  const handlePDFOrImage = async (file: File) => {
-    if (file.type === 'application/pdf') {
-      await handlePDFUpload(file);
-    } else {
-      await triggerWebhook(file);
-      setUploadedFileName(file.name);
-      setUploadComplete(true);
     }
   };
 
@@ -629,31 +503,6 @@ export default function Transactions() {
     setUploadComplete(false);
   };
 
-  // Make sure isPDFImportValid only requires date and amount
-  const isPDFImportValid = pdfImportRows.every(
-    row => row.date && row.date !== '' && row.amount !== undefined && row.amount !== null
-  );
-
-  // Handler to update a cell in the PDF import table
-  const handlePDFImportCellChange = (rowIdx: number, field: keyof Transaction, value: string) => {
-    setPDFImportRows(prev => prev.map((row, idx) =>
-      idx === rowIdx ? { ...row, [field]: field === 'amount' ? parseFloat(value) : value } : row
-    ));
-  };
-
-  // Handler to delete a row from PDF import
-  const handlePDFImportDeleteRow = (rowIdx: number) => {
-    setPDFImportRows(prev => prev.filter((_, idx) => idx !== rowIdx));
-  };
-
-  // Handler to add a new row
-  const handlePDFImportAddRow = () => {
-    setPDFImportRows(prev => [
-      ...prev,
-      { id: '', date: '', description: '', amount: 0, category: '', document_id: '' }
-    ]);
-  };
-
   // Bulk Edit Modal State
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   const [bulkEditCategory, setBulkEditCategory] = useState('');
@@ -722,6 +571,7 @@ export default function Transactions() {
             <a href="/transactions" className="py-2 px-4 rounded bg-gray-700">Transactions</a>
             <a href="/reports" className="py-2 px-4 rounded hover:bg-gray-700">Reports</a>
             <a href="/settings" className="py-2 px-4 rounded hover:bg-gray-700">Settings</a>
+            <a href="/pdf-to-csv" className="py-2 px-4 rounded hover:bg-gray-700">PDF to CSV</a>
           </nav>
         </aside>
 
@@ -1041,12 +891,12 @@ export default function Transactions() {
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <span className="text-4xl mb-2">📄</span>
-                  <span className="text-gray-700 mb-2">Drag and drop your CSV, PDF, or image file here</span>
+                  <span className="text-gray-700 mb-2">Drag and drop your CSV file here</span>
                   <span className="text-gray-500 text-sm mb-2">or click to select a file</span>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".csv,.pdf,image/*"
+                    accept=".csv"
                     className="hidden"
                     onChange={handleFileInput}
                   />
@@ -1269,107 +1119,6 @@ export default function Transactions() {
             >
               ×
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* Upload Success Modal for PDF/Image */}
-      {showUploadSuccess && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
-            <h2 className="text-xl font-semibold mb-4">Upload Complete</h2>
-            <p className="mb-6">Your file was uploaded successfully.</p>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => setShowUploadSuccess(false)}
-                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-              >
-                OK
-              </button>
-            </div>
-            <button
-              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none"
-              onClick={() => setShowUploadSuccess(false)}
-              aria-label="Close"
-            >
-              ×
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* PDF Import Modal */}
-      {showPDFImportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40" onClick={handleDiscardPDFImport}>
-          <div className="bg-white rounded-lg shadow-lg w-full max-w-4xl p-6 relative" onClick={e => e.stopPropagation()}>
-            <h2 className="text-xl font-semibold mb-4">Review & Edit Imported Transactions (PDF)</h2>
-            {pdfImportLoading ? (
-              <div className="flex flex-col items-center justify-center py-12">
-                <div className="mb-4"><span className="animate-spin inline-block w-8 h-8 border-4 border-blue-400 border-t-transparent rounded-full"></span></div>
-                <div className="text-gray-700">Processing PDF, please wait...</div>
-              </div>
-            ) : pdfImportError ? (
-              <div className="mb-4 text-red-600">{pdfImportError}</div>
-            ) : (
-              <>
-                <div className="overflow-x-auto mb-4">
-                  <div className="max-h-[400px] md:max-h-[50vh] overflow-y-auto">
-                    <table className="min-w-full text-sm border">
-                      <thead>
-                        <tr>
-                          <th className="px-2 py-1 border-b">Date</th>
-                          <th className="px-2 py-1 border-b">Description</th>
-                          <th className="px-2 py-1 border-b">Amount</th>
-                          <th className="px-2 py-1 border-b">Category</th>
-                          <th className="px-2 py-1 border-b">Document ID</th>
-                          <th className="px-2 py-1 border-b">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pdfImportRows.map((row, idx) => (
-                          <tr key={idx}>
-                            <td className="px-2 py-1 border-b">
-                              <input type="date" value={row.date || ''} onChange={e => handlePDFImportCellChange(idx, 'date', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
-                            </td>
-                            <td className="px-2 py-1 border-b">
-                              <input type="text" value={row.description || ''} onChange={e => handlePDFImportCellChange(idx, 'description', e.target.value)} className="w-40 border rounded px-1 py-0.5" />
-                            </td>
-                            <td className="px-2 py-1 border-b">
-                              <input type="number" value={row.amount} onChange={e => handlePDFImportCellChange(idx, 'amount', e.target.value)} className="w-24 border rounded px-1 py-0.5" />
-                            </td>
-                            <td className="px-2 py-1 border-b">
-                              <input type="text" value={row.category || ''} onChange={e => handlePDFImportCellChange(idx, 'category', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
-                            </td>
-                            <td className="px-2 py-1 border-b">
-                              <input type="text" value={row.document_id || ''} onChange={e => handlePDFImportCellChange(idx, 'document_id', e.target.value)} className="w-32 border rounded px-1 py-0.5" />
-                            </td>
-                            <td className="px-2 py-1 border-b">
-                              <button onClick={() => handlePDFImportDeleteRow(idx)} className="text-red-600 hover:text-red-900">Delete</button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-                <div className="flex gap-2 mb-4">
-                  <button onClick={handlePDFImportAddRow} className="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm border border-gray-300">Add Row</button>
-                </div>
-                {/* Show error if not valid */}
-                {!isPDFImportValid && (
-                  <div className="mb-2 text-red-600">Missing required fields in one or more transactions.</div>
-                )}
-                {pdfImportSubmitError && (
-                  <div className="mb-2 text-red-600">{pdfImportSubmitError}</div>
-                )}
-                <div className="flex justify-end gap-2">
-                  <button onClick={handleDiscardPDFImport} className="px-4 py-2 rounded-md border border-gray-300 text-gray-700">Cancel</button>
-                  <button onClick={handleSubmitPDFImport} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700" disabled={!isPDFImportValid || pdfImportSubmitLoading}>{pdfImportSubmitLoading ? 'Importing...' : 'Import to Database'}</button>
-                </div>
-              </>
-            )}
-            <button className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-2xl font-bold focus:outline-none" onClick={handleDiscardPDFImport} aria-label="Close">×</button>
           </div>
         </div>
       )}
